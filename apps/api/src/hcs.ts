@@ -30,12 +30,16 @@ export async function submitHcs(msg: HcsMessage): Promise<{ topicId: string; seq
 
 export type TopicEntry = HcsMessage & { sequence: number; consensusTimestamp: string };
 
-/** Public mirror-node read. Drops anything that is not a v3 message. */
-export async function readTopic(limit = 100, topicId = config.hedera.topicId): Promise<TopicEntry[]> {
+/**
+ * Public mirror-node read. Drops anything that is not a v3 message.
+ * `order: "asc"` pages from sequence 1 (the whole history, for recomputing scores). `"desc"` returns the newest
+ * messages first; use it for anything that shows recent activity, or a busy topic only ever shows its oldest entries.
+ */
+export async function readTopic(limit = 100, topicId = config.hedera.topicId, order: "asc" | "desc" = "asc"): Promise<TopicEntry[]> {
   if (!topicId) return [];
   const base = MIRROR_NODE[config.hedera.network as HederaNetwork];
   const out: TopicEntry[] = [];
-  let url: string | null = `${base}/api/v1/topics/${topicId}/messages?order=asc&limit=${Math.min(limit, 100)}`;
+  let url: string | null = `${base}/api/v1/topics/${topicId}/messages?order=${order}&limit=${Math.min(limit, 100)}`;
   while (url && out.length < limit) {
     const res: Response = await fetch(url, { signal: AbortSignal.timeout(20_000) });
     if (!res.ok) throw new Error(`mirror node ${res.status}`);

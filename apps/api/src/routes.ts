@@ -728,7 +728,7 @@ export function mount(app: Hono, db: Db) {
 
   app.get("/api/ledger", async (c) => {
     if (!config.hedera.topicId) return c.json({ error: "HCS is not configured", missing: ["HCS_TOPIC_ID"] }, 503);
-    const entries = await readTopic(50);
+    const entries = await readTopic(50, config.hedera.topicId, "desc");
     return c.json({
       topic: config.hedera.topicId,
       hashscan: hashscanTopic(config.hedera.topicId, config.hedera.network),
@@ -758,7 +758,7 @@ export function mount(app: Hono, db: Db) {
     let log: unknown[] = [];
     if (config.hedera.topicId) {
       try {
-        const entries = await readTopic(50);
+        const entries = await readTopic(50, config.hedera.topicId, "desc");
         log = entries.map((e) => ({
           event: "event" in e ? e.event : e.kind,
           kind: e.kind,
@@ -785,6 +785,15 @@ export function mount(app: Hono, db: Db) {
       tokenId: config.token.id || null,
       contractId: config.escrow.contractId || null,
       topicId: config.hedera.topicId || null,
+      // Unsigned summary for the human dashboard. Agents buy the signed, HCS-anchored copy at /x402/escrow/stats.
+      stats: {
+        tasksPaid: stats.tasksByState.Released ?? 0,
+        tasksInFlight: (stats.tasksByState.Claimed ?? 0) + (stats.tasksByState.Submitted ?? 0) + (stats.tasksByState.AwaitingApproval ?? 0),
+        medianSecondsToPay: stats.medianSecondsToPay,
+        autoReleaseShare: stats.autoReleaseShare,
+        disputeRate: stats.disputeRate,
+        hcsLatest: (log[0] as { sequence?: number } | undefined)?.sequence ?? null,
+      },
       log,
       leaderboard: publicScores(db).map((row) => ({
         worker: row.worker,
