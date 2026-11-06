@@ -3,14 +3,13 @@
  * Batch ids are new every run. Stops with a plain list if the chain is not configured.
  *   npm run demo-seed
  */
-import { evmAddressFromKey } from "../apps/api/src/chain";
+import { evmAddressFromKey, requireRole, tokenBalance } from "../apps/api/src/chain";
 import { config } from "../apps/api/src/config";
 import { openDb, run } from "../apps/api/src/db";
 import { registerWorker } from "../apps/api/src/escrow";
 import { claim, createBatch, submit } from "../apps/api/src/work";
 import { transferBusd } from "../apps/api/src/escrow";
-import { requireRole } from "../apps/api/src/chain";
-import { decimalToBase } from "@byline-work/shared";
+import { baseToDecimal, decimalToBase } from "@byline-work/shared";
 import { deposit, kyc } from "../stablecoin/lifecycle";
 import { die, missing, need } from "./lib";
 import { randomUUID } from "node:crypto";
@@ -41,12 +40,20 @@ const lab = need("LAB_ACCOUNT_ID");
 const workerAccount = need("WORKER_A_ACCOUNT_ID");
 console.log("demo custody: the lab key is held by this process.");
 
-const deposited = await deposit(lab, "1000");
-console.log(`deposited 1000 bUSD  reserve ${deposited.reserveTx}  cash-in ${deposited.cashInTx}`);
-
+// KYC first: bUSD has a KYC key, so a cash-in to an account without KYC is refused.
 for (const id of [lab, need("TREASURY_ACCOUNT_ID"), need("QA_POOL_ACCOUNT_ID"), need("ESCROW_CONTRACT_ID"), workerAccount]) {
   const tx = await kyc(id);
   console.log(`kyc ${id}  ${tx}`);
+}
+
+// The three batches below lock about 711 bUSD. Deposit only when the lab is short, so a rerun does not keep minting.
+const NEEDED = decimalToBase("800");
+const held = await tokenBalance(lab, need("BUSD_TOKEN_ID"));
+if (held >= NEEDED) {
+  console.log(`lab already holds ${baseToDecimal(held)} bUSD, skipping the deposit`);
+} else {
+  const deposited = await deposit(lab, "1000");
+  console.log(`deposited 1000 bUSD  reserve ${deposited.reserveTx}  cash-in ${deposited.cashInTx}`);
 }
 
 const evm = evmAddressFromKey(need("WORKER_A_PRIVATE_KEY"));
@@ -127,9 +134,10 @@ if (process.env.WORKER_RENTED_ACCOUNT_ID?.trim() && process.env.WORKER_RENTED_PR
   console.log("WORKER_RENTED_* not set: the freeze scene has no account prepared.");
 }
 
-console.log("Funded: $1000 locked across three new batches (demo custody).");
+console.log(`Funded: ${baseToDecimal(decimalToBase(a.totalDecimal) + decimalToBase(b.totalDecimal) + decimalToBase(c.totalDecimal))} bUSD locked across three new batches (demo custody).`);
 console.log(`BATCH_A=${a.batchId}  ${a.totalDecimal} bUSD  ${a.txId}`);
 console.log(`BATCH_B=${b.batchId}  ${b.totalDecimal} bUSD  ${b.txId}`);
 console.log(`BATCH_C=${c.batchId}  task ${claimed.taskId} submitted ${submitted.txId}`);
 console.log("Batch C is manual. Auto QA will not pass it. The timeout scene pays it.");
 console.log(`worker label: demo human (not a World ID)`);
+process.exit(0); // the SDK and escrow clients keep handles open; do not hang after the seed is done

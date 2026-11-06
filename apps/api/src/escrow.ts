@@ -24,7 +24,8 @@ export async function approveBusd(owner: { accountId: string; privateKey: string
     abi: erc20Abi,
     functionName: "approve",
     args: [spender, amount],
-    gas: 400_000,
+    // Measured on testnet: an ERC-20 approve on the bUSD HTS facade used 726,816 gas (HTS ops are priced in USD).
+    gas: 1_200_000,
   });
 }
 

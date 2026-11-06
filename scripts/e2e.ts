@@ -8,7 +8,7 @@ import { randomUUID } from "node:crypto";
 import { decimalToBase, releaseSplit } from "@byline-work/shared";
 import { evmAddressFromKey, tokenBalance } from "../apps/api/src/chain";
 import { config } from "../apps/api/src/config";
-import { get, openDb, run, type WorkerRow } from "../apps/api/src/db";
+import { all, get, openDb, run, type WorkerRow } from "../apps/api/src/db";
 import { approveTask, registerWorker } from "../apps/api/src/escrow";
 import { indexerTick } from "../apps/api/src/indexer";
 import { keeperTick } from "../apps/api/src/keeper";
@@ -49,13 +49,38 @@ function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-async function expectHcs(taskId: number, names: string[]) {
-  await indexerTick(db);
-  for (const name of names) {
-    const row = get<{ hcs_sequence: number | null }>(db, "SELECT hcs_sequence FROM task_events WHERE task_id = ? AND name = ? ORDER BY created_at DESC LIMIT 1", taskId, name);
-    if (!row?.hcs_sequence) die(`No HCS message for ${name} on task ${taskId}. The indexer tick did not anchor it.`);
-    console.log(`  hcs ${name} #${row.hcs_sequence}`);
+/**
+ * A failed earlier run leaves submitted tasks whose schedules pay this same worker later, which lands inside the
+ * balance windows below and reads as a double payout (seen on testnet: 80 bUSD for one 40 bUSD task). Wait for them.
+ */
+async function settleOutstanding() {
+  const pending = () => all<{ task_id: number; state: string }>(db, "SELECT task_id, state FROM tasks WHERE lower(worker_evm) = ? AND state NOT IN ('Released','Refunded','Resolved','Expired')", evm.toLowerCase());
+  const until = Date.now() + 12 * 60_000;
+  for (;;) {
+    await indexerTick(db);
+    const p = pending();
+    if (!p.length) return;
+    if (Date.now() > until) die(`Tasks of this worker are still unsettled after 12 minutes: ${p.map((t) => `${t.task_id}:${t.state}`).join(", ")}`);
+    console.log(`  waiting for ${p.length} unsettled task(s) from an earlier run: ${p.map((t) => `${t.task_id}:${t.state}`).join(", ")}`);
+    await keeperTick(db);
+    await sleep(10_000);
   }
+}
+
+/** The mirror node trails consensus by a few seconds, so poll the indexer instead of ticking it once. */
+async function expectHcs(taskId: number, names: string[]) {
+  const until = Date.now() + 90_000;
+  const seq = (name: string) => get<{ hcs_sequence: number | null }>(db, "SELECT hcs_sequence FROM task_events WHERE task_id = ? AND name = ? ORDER BY created_at DESC LIMIT 1", taskId, name)?.hcs_sequence ?? null;
+  for (;;) {
+    await indexerTick(db);
+    if (names.every((n) => seq(n))) break;
+    if (Date.now() > until) {
+      const gone = names.filter((n) => !seq(n));
+      die(`No HCS message for ${gone.join(", ")} on task ${taskId} after 90 s. Check the chain for the event before blaming the indexer.`);
+    }
+    await sleep(4000);
+  }
+  for (const name of names) console.log(`  hcs ${name} #${seq(name)}`);
 }
 
 async function assertPaid(payDecimal: string, before: { worker: bigint; treasury: bigint; qa: bigint }) {
@@ -87,6 +112,7 @@ async function balances() {
 
 console.log(`scheduling: ${scheduling}`);
 let keeperPaid = false;
+await settleOutstanding();
 
 console.log("instant");
 {

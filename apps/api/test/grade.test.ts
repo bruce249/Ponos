@@ -43,3 +43,11 @@ test("the report hash is deterministic and changes with the outcome", () => {
   assert.notEqual(a.reportHash, c.reportHash);
   assert.match(a.reportHash, /^0x[0-9a-f]{64}$/);
 });
+
+test("the 0G verdict is read from its JSON reply and never turns an unparseable reply into a failure", async () => {
+  const { parseZgVerdict } = await import("../src/qa/grade");
+  assert.equal(parseZgVerdict('{"pass": true, "notes": "ok"}'), "pass");
+  assert.equal(parseZgVerdict('{"pass":false,"notes":"x"}'), "fail");
+  assert.equal(parseZgVerdict("I could not decide"), "unknown");
+  assert.equal(parseZgVerdict(""), "unknown");
+});

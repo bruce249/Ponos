@@ -70,6 +70,11 @@ contract EscrowVault {
     bytes32 public constant PATH_DISPUTE_TIMEOUT = "dispute_timeout";
 
     uint256 public constant SCHEDULE_GAS = 750_000;
+    /// Seconds added to the review deadline before the release is scheduled. On Hedera `block.timestamp` is the
+    /// block's start time, which can trail a transaction's consensus time by a couple of seconds. A schedule set
+    /// for the exact deadline ran at consensus 339.04 but saw block.timestamp < 339, so `releaseIfDue` returned
+    /// false and nothing was paid (observed on testnet, 25,966 gas). The worker is paid this much later, no more.
+    uint256 public constant SCHEDULE_BUFFER = 6;
     address public constant HSS = address(uint160(0x16b));
     uint16 public constant BPS = 10_000;
 
@@ -195,6 +200,8 @@ contract EscrowVault {
         _;
     }
 
+    /// @dev Payable: the deploy script sends an initial HBAR balance for HIP-1215 schedule fees. A non-payable
+    ///      constructor reverts with empty data when value is attached.
     constructor(
         address token_,
         address treasury_,
@@ -208,7 +215,7 @@ contract EscrowVault {
         uint32 disputeWindow_,
         bool schedulingEnabled_,
         uint256 hbarLowWatermark_
-    ) {
+    ) payable {
         if (token_ == address(0) || treasury_ == address(0) || qaPool_ == address(0) || admin_ == address(0)) revert ZeroAddress();
         if (platformFeeBps_ > BPS || qaPoolShareBps_ > BPS) revert BadConfig();
         if (minWindow_ == 0 || minWindow_ > maxWindow_ || disputeWindow_ == 0) revert BadConfig();
@@ -632,7 +639,7 @@ contract EscrowVault {
     function _scheduleRelease(uint256 taskId, uint64 expiry) internal returns (address schedule) {
         if (!schedulingEnabled) return address(0);
         if (address(this).balance < hbarLowWatermark) emit HbarLow(address(this).balance);
-        uint256 when = expiry;
+        uint256 when = uint256(expiry) + SCHEDULE_BUFFER;
         try IHederaScheduleService(HSS).hasScheduleCapacity(when, SCHEDULE_GAS) returns (bool ok) {
             if (!ok) {
                 when += 1;

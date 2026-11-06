@@ -70,8 +70,10 @@ const encoded = encodeAbiParameters(
 );
 
 const client = adminClient();
+// Cost: the SDK uploads the hex text in ~4 KB chunks and testnet charges ~5.7 HBAR per chunk, so a deploy needs
+// roughly 50 HBAR of upload fees plus the 20 HBAR starting balance. Fund ESCROW_ADMIN with ~100 HBAR first.
 const created = await new ContractCreateFlow()
-  .setBytecode(bytecode)
+  .setBytecode(bytecode.replace(/^0x/, ""))  // the SDK uploads this as hex text; no 0x prefix
   .setGas(8_000_000)
   .setConstructorParameters(Buffer.from(encoded.slice(2), "hex"))
   .setInitialBalance(new Hbar(20))
@@ -121,10 +123,13 @@ if (reviewer2Key) {
   console.log("# REVIEWER2_PRIVATE_KEY not set: dual review (ESC-22) stays off.");
 }
 client.close();
+process.exit(0); // the escrow client keeps handles open; without this the script hangs after finishing
 
 function adminClient(): Client {
   const network = process.env.HEDERA_NETWORK || "hedera:testnet";
   const c = network === "hedera:mainnet" ? Client.forMainnet() : Client.forTestnet();
   c.setOperator(AccountId.fromString(need("ESCROW_ADMIN_ACCOUNT_ID")), parseHederaKey(need("ESCROW_ADMIN_PRIVATE_KEY")) as unknown as PrivateKey);
+  // The default max fee (2 HBAR) is too low for a multi-chunk bytecode upload: INSUFFICIENT_TX_FEE on FileAppend.
+  c.setDefaultMaxTransactionFee(new Hbar(20));
   return c;
 }

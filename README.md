@@ -79,7 +79,7 @@ New in this repo: the escrow contract, the escrow client, the mirror-node indexe
 
 ## Status
 
-Written and tested locally. On testnet so far: the HCS topic, the role accounts and bUSD (token `0.0.11340549`). **The escrow is not deployed yet.** `forge test` (46 tests: 41 unit and fuzz, 5 invariants), `npm test` (40) and `npm run typecheck` pass, but those use a mock token and a mock schedule service. The HIP-1215 schedule call and the Stablecoin Studio SDK calls are unproven until the spikes in `BYLINE_WORK_BUILD.md` run. `npm run e2e` fails, rather than passing quietly, if the schedule does not fire and only the keeper paid.
+Written and tested locally. On testnet so far: the HCS topic, the role accounts and bUSD (token `0.0.11340549`). The escrow is deployed (`0.0.11341621`, [HashScan](https://hashscan.io/testnet/contract/0.0.11341621)) and a task has been paid by its HIP-1215 schedule with no keeper running. `npm run e2e` has not been run yet, and the source is not verified on HashScan. `forge test` (46 tests: 41 unit and fuzz, 5 invariants), `npm test` (40) and `npm run typecheck` pass, but those use a mock token and a mock schedule service. The HIP-1215 schedule call and the Stablecoin Studio SDK calls are unproven until the spikes in `BYLINE_WORK_BUILD.md` run. `npm run e2e` fails, rather than passing quietly, if the schedule does not fire and only the keeper paid.
 
 ## Reviewers and large payouts
 
@@ -121,7 +121,7 @@ The keeper runs every 15 seconds in every scheduling mode. It expires claims, re
 
 Direct `claim` on the contract is only valid at or below 100 bUSD (`100_000_000` base units). The API always uses the relayer. Above 100 bUSD the relayer also requires a single-use `claim_high` approval whose target is the batch id. The payout address is stored on the task at claim. A later wallet change applies to new claims only.
 
-Auto QA grades gold answers and a rubric checklist immediately. Manual batches are never auto-passed. 0G is called only when `ZG_API_KEY` is set, and `teeVerified` is copied from the provider trace. It is never set to true by this server.
+Auto QA grades gold answers and a rubric checklist immediately. Manual batches are never auto-passed. 0G is called only when `ZG_API_KEY` is set. It is advisory: its verdict, request id and `teeVerified` (copied from the provider trace, never set to true by this server) are stored in the report, and a disagreement is flagged, but the outcome comes from the deterministic grade alone.
 
 A World ID `sub` is stored in SQLite and rejected by the HCS schema. It is not written to events or public JSON. `DEMO_MOCK_WORLD=1` can create a worker labelled **demo human**. That row is not a World ID.
 

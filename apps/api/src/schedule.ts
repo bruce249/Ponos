@@ -9,6 +9,9 @@ import { config } from "./config";
 import { hederaClient, requireEscrow, requireRole } from "./chain";
 import { get, run, type Db } from "./db";
 
+/** Mirrors EscrowVault.SCHEDULE_BUFFER: block.timestamp can trail consensus time, so schedule just after the deadline. */
+export const SCHEDULE_BUFFER_SEC = 6;
+
 export async function scheduleRelease(db: Db, taskId: bigint, expirySec: number): Promise<string | null> {
   if (config.escrow.scheduling !== "sdk") return null;
   requireEscrow();
@@ -20,7 +23,7 @@ export async function scheduleRelease(db: Db, taskId: bigint, expirySec: number)
     .setContractId(ContractId.fromString(config.escrow.contractId))
     .setGas(750_000)
     .setFunctionParameters(Buffer.from(data.slice(2), "hex"));
-  const when = Math.max(expirySec, Math.floor(Date.now() / 1000) + 5);
+  const when = Math.max(expirySec + SCHEDULE_BUFFER_SEC, Math.floor(Date.now() / 1000) + 5);
   const tx = await new ScheduleCreateTransaction()
     .setScheduledTransaction(inner)
     .setWaitForExpiry(true)

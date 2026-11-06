@@ -2,7 +2,7 @@
 
 Companion to [BYLINE_WORK.md](BYLINE_WORK.md). The spec says what we are building. This file says in what order, what "done" means at each step, and which gaps in the spec we close before writing code.
 
-Status, 2026-11-06: **code written and tested locally. Testnet: topic, 16 role accounts and bUSD exist (spike S1 done); the escrow is not deployed yet.** Contracts (46 Foundry tests: 41 unit and fuzz, 5 invariants), the API, the web app, the stablecoin scripts and the x402 service exist and pass `forge test`, `npm test` (40) and `npm run typecheck`. No `.env`, accounts, bUSD token, escrow deployment or HCS topic exist yet, so gates G0, G1 (testnet half), G2, G4 and G6 are open. See [section 2](#2-decisions-to-make-before-code) for the decision log and `npm run preflight` for what each testnet step still needs.
+Status, 2026-11-06: **code written and tested locally. Testnet: topic, 16 role accounts, bUSD (S1 done) and the escrow `0.0.11341621` exist. A task has been paid by the HIP-1215 schedule alone (S2, S3 done); `npm run e2e` has not been run yet.** Contracts (46 Foundry tests: 41 unit and fuzz, 5 invariants), the API, the web app, the stablecoin scripts and the x402 service exist and pass `forge test`, `npm test` (40) and `npm run typecheck`. No `.env`, accounts, bUSD token, escrow deployment or HCS topic exist yet, so gates G0, G1 (testnet half), G2, G4 and G6 are open. See [section 2](#2-decisions-to-make-before-code) for the decision log and `npm run preflight` for what each testnet step still needs.
 
 ---
 
@@ -59,7 +59,7 @@ Record each decision here, with the spike's tx IDs, before Phase 1 starts.
 
 | # | Status | What the code does now | Still needed |
 |---|---|---|---|
-| D1 | **Open** | `ESCROW_SCHEDULING` = `hip1215` (default, inside the contract), `sdk` (`schedule.ts`) or `keeper`. The keeper runs in every mode. | Spike S3 on testnet. `npm run e2e` now fails if a schedule does not fire and only the keeper paid (set `E2E_ALLOW_KEEPER_FALLBACK=1` to accept that). Write the result and tx ids here. |
+| D1 | **Decided: `hip1215`** | `ESCROW_SCHEDULING=hip1215` (default, inside the contract) with a 6 s buffer after the deadline. `sdk` and `keeper` stay as fallbacks, and the keeper runs in every mode. | `npm run e2e` still fails if a schedule does not fire and only the keeper paid (set `E2E_ALLOW_KEEPER_FALLBACK=1` to accept that), so the full path set is re-proved on the new escrow. |
 | D2 | Implemented | Relayer calls `claimFor` / `submitFor` / `resubmitFor` / `disputeFor`. Direct `claim` reverts above `HITL_THRESHOLD`. | — |
 | D3 | Implemented | Server-held lab key, labelled "demo custody". | — |
 | D4 | **Open** | HBAR fixed custom fee of 1 tinybar with collectors exempt (`stablecoin/client.ts`). The 3% fee lives in the contract. | Spike S4: confirm the escrow's bUSD balance after payout is exact. `e2e` asserts exact deltas. |
@@ -75,9 +75,9 @@ None of S1 to S8 has been run. Fill this in as each one completes.
 
 | Spike | Result | Tx ids / links | Date |
 |---|---|---|---|
-| S1 bUSD with Stablecoin Studio | **done 2026-11-06.** Token `0.0.11340549`, proxy `0x6f0ad3a58548e1d327e6896116784beb4ddff4f3` (`0.0.11340548`), reserve `0.0.11340547`. KYC, freeze, wipe and pause keys set; supply 0, 6 decimals. Fixed HBAR fee of 1 tinybar to the treasury on chain. Not yet tested: a cash-in above the reserve failing (TOK-02). A second, unused token `0.0.11340685` also exists from a duplicate create run. | [token](https://hashscan.io/testnet/token/0.0.11340549) · fee tx `0.0.11339160@1793976988.922104289` | 2026-11-06 |
-| S2 contract holds bUSD | not run | | |
-| S3 HIP-1215 `scheduleCall` | not run | | |
+| S1 bUSD with Stablecoin Studio | **done 2026-11-06.** Token `0.0.11340549`, proxy `0x6f0ad3a58548e1d327e6896116784beb4ddff4f3` (`0.0.11340548`), reserve `0.0.11340547`. KYC, freeze, wipe and pause keys set; supply 0, 6 decimals. Fixed HBAR fee of 1 tinybar to the treasury on chain. TOK-02 verified: a cash-in above the reserve is refused ("The reserve is less than the amount to cash in"), supply unchanged. TOK-06 verified: reserve update then cash-in of 1,000 bUSD to the lab (reserve tx `0.0.11339160@1793977318.249146545`, cash-in tx `0.0.11339161@1793977364.885333554`). A second, unused token `0.0.11340685` also exists from a duplicate create run. | [token](https://hashscan.io/testnet/token/0.0.11340549) · fee tx `0.0.11339160@1793976988.922104289` | 2026-11-06 |
+| S2 contract holds bUSD | **done 2026-11-06.** Escrow `0.0.11341621` (redeployed with the schedule buffer; the first one, `0.0.11341079`, is retired and holds 0 bUSD). `fundBatch` pulled bUSD through the ERC-20 facade (about 118–135k gas), and a release paid the worker plus the treasury and QA pool (about 148k gas). Needed an `approve` gas limit of 1.2M (measured 726,816). The constructor had to be `payable`. Deploying costs about 50 HBAR in upload fees (about 5.7 HBAR per 4 KB chunk; a short file expiry does not help). | [contract](https://hashscan.io/testnet/contract/0.0.11341621) | 2026-11-06 |
+| S3 HIP-1215 `scheduleCall` | **done 2026-11-06. It works, with a buffer.** `submit` creates a schedule (`submitFor` about 1.53M gas). Scheduled for the exact deadline it fired at consensus 339.04 but `block.timestamp` (the block's start time) was still before 339, so `releaseIfDue` returned false after 25,966 gas and nothing was paid. Scheduled `SCHEDULE_BUFFER = 6` seconds after the deadline, schedule `0.0.11341648` fired at deadline + 6 s, used 149,069 gas, emitted `TaskReleased` and three transfers, and worker A went from 40 to 80 bUSD with no API or keeper running. | schedule [`0.0.11341648`](https://hashscan.io/testnet/schedule/0.0.11341648); failed run [`0.0.11341366`](https://hashscan.io/testnet/schedule/0.0.11341366) | 2026-11-06 |
 | S3b SDK schedule | not run | | |
 | S4 custom fee on contract transfers | not run | | |
 | S5 frozen / un-KYC'd transfer | not run | | |

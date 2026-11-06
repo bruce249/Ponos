@@ -12,7 +12,7 @@ const roleVars = roles.flatMap((r) => [`${r}_ACCOUNT_ID`, `${r}_PRIVATE_KEY`]);
 
 const steps: Step[] = [
   { name: "0a. feed signer key", command: "npm run keys", needs: [], note: "prints FEED_SIGNER_KEY" },
-  { name: "0b. role accounts", command: "npm run accounts", needs: ["OPERATOR_ACCOUNT_ID", "OPERATOR_PRIVATE_KEY"], note: "needs about 200 testnet HBAR on the operator" },
+  { name: "0b. role accounts", command: "npm run accounts", needs: ["OPERATOR_ACCOUNT_ID", "OPERATOR_PRIVATE_KEY"], note: "needs about 580 testnet HBAR on the operator" },
   { name: "0c. HCS topic", command: "npm run topic", needs: ["OPERATOR_ACCOUNT_ID", "OPERATOR_PRIVATE_KEY"] },
   { name: "0d. create bUSD (spike S1)", command: "npm run busd", needs: ["SCS_FACTORY_ADDRESS", "SCS_RESOLVER_ADDRESS", "SCS_ADMIN_ACCOUNT_ID", "SCS_ADMIN_PRIVATE_KEY", "CASHIN_ACCOUNT_ID", "BURN_ACCOUNT_ID", "COMPLIANCE_ACCOUNT_ID", "TREASURY_ACCOUNT_ID"], note: "factory and resolver come from the Stablecoin Studio testnet deployment" },
   { name: "1a. forge build", command: "cd contracts && forge build", needs: [] },

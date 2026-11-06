@@ -461,7 +461,8 @@ contract EscrowVaultTest is Test {
 
         assertEq(_scheduleOf(scheduled, taskId), address(0x5C11ED));
         (, , , , uint64 reviewDeadline) = _deadlinesOf(scheduled, taskId);
-        assertEq(hss.lastExpiry(), reviewDeadline);
+        // Scheduled just after the deadline: block.timestamp can trail consensus time on Hedera.
+        assertEq(hss.lastExpiry(), uint256(reviewDeadline) + scheduled.SCHEDULE_BUFFER());
         assertEq(hss.lastTo(), address(scheduled));
         bytes memory data = hss.lastData();
         bytes4 sel;
@@ -482,7 +483,27 @@ contract EscrowVaultTest is Test {
         vm.prank(worker);
         scheduled.submit(taskId, keccak256("work"));
         (, , , , uint64 reviewDeadline) = _deadlinesOf(scheduled, taskId);
-        assertEq(hss.lastExpiry(), uint256(reviewDeadline) + 1);
+        assertEq(hss.lastExpiry(), uint256(reviewDeadline) + scheduled.SCHEDULE_BUFFER() + 1);
+    }
+
+    /// Regression for the testnet miss: a scheduled run whose block.timestamp is a second behind the consensus
+    /// time must still find the task due, because the schedule was set after the deadline plus a buffer.
+    function test_scheduled_release_survives_block_timestamp_lag() public {
+        MockScheduleService impl = new MockScheduleService();
+        vm.etch(scheduled.HSS(), address(impl).code);
+        MockScheduleService hss = MockScheduleService(scheduled.HSS());
+        hss.setCapacity(true);
+
+        bytes32 id = _fund(scheduled, 40_000_000, 1);
+        vm.prank(worker);
+        uint256 taskId = scheduled.claim(id);
+        vm.prank(worker);
+        scheduled.submit(taskId, keccak256("work"));
+
+        // Consensus time of the scheduled call is the stored expiry; the block clock reads 2 seconds earlier.
+        vm.warp(hss.lastExpiry() - 2);
+        assertTrue(scheduled.releaseIfDue(taskId), "a lagging block clock must not block the payout");
+        assertEq(busd.balanceOf(payout), 40_000_000);
     }
 
     function test_low_hbar_emits() public {
@@ -498,6 +519,14 @@ contract EscrowVaultTest is Test {
         emit EscrowVault.HbarLow(0);
         vm.prank(worker);
         scheduled.submit(taskId, keccak256("work"));
+    }
+
+    /// The deploy script attaches HBAR for schedule fees. A non-payable constructor reverts with empty data.
+    function test_constructor_accepts_initial_hbar() public {
+        EscrowVault funded = new EscrowVault{value: 5 ether}(
+            address(busd), treasury, qaPool, admin, HITL, FEE_BPS, QA_BPS, MIN_W, MAX_W, DISPUTE_W, true, 1 ether
+        );
+        assertEq(address(funded).balance, 5 ether);
     }
 
     // ---------- ESC-22: two reviewers above the dual-review threshold ----------

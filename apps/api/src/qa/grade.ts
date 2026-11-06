@@ -9,6 +9,14 @@ export type Grade = {
   body: { reasons: string[]; goldChecked: number; checklist: string[] };
 };
 
+export type ZgVerdict = "pass" | "fail" | "unknown";
+
+/** Reads the `pass` field of the model's JSON reply. Anything unparseable is "unknown", never a failure. */
+export function parseZgVerdict(text: string): ZgVerdict {
+  const m = /"pass"\s*:\s*(true|false)/.exec(text);
+  return m ? (m[1] === "true" ? "pass" : "fail") : "unknown";
+}
+
 export function gradeSubmission(submission: WorkSubmission, gold: Record<string, string>, checklist: string[]): Grade {
   const reasons: string[] = [];
   for (const [key, want] of Object.entries(gold)) {

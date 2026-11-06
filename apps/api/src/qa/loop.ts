@@ -8,7 +8,7 @@ import type { Hex, WorkSubmission } from "@byline-work/shared";
 import { config } from "../config";
 import { all, get, run, type Db } from "../db";
 import { qaFail, qaPass } from "../escrow";
-import { gradeSubmission } from "./grade";
+import { gradeSubmission, parseZgVerdict, type ZgVerdict } from "./grade";
 import { zgChat } from "./zg";
 
 type Pending = { task_id: number; body: string; qa_mode: string; gold_json: string; checklist_json: string };
@@ -37,6 +37,7 @@ export async function gradeTask(db: Db, taskId: number): Promise<{ pass: boolean
   let requestId: string | null = null;
   let teeVerified: boolean | null = null;
   let zgNote: string | null = null;
+  let zgVerdict: ZgVerdict | null = null;
   if (config.zg.apiKey) {
     try {
       const zg = await zgChat(config.zg, [
@@ -46,17 +47,16 @@ export async function gradeTask(db: Db, taskId: number): Promise<{ pass: boolean
       requestId = zg.requestId;
       teeVerified = zg.teeVerified;
       zgNote = zg.text.slice(0, 500);
-      if (/"pass"\s*:\s*false/.test(zg.text) && grade.pass) {
-        grade.reasons.push("0G rubric grader declined the pass");
-        grade.pass = false;
-      }
+      // Advisory only. The model is sent gold keys and a flag, not the worker's answer, so it cannot judge the work,
+      // and on testnet it flipped a correct submission to fail. The outcome comes from the deterministic grade alone.
+      zgVerdict = parseZgVerdict(zg.text);
     } catch (e: unknown) {
       zgNote = e instanceof Error ? e.message : String(e);
       teeVerified = null;
     }
   }
 
-  const reportBody = { reasons: grade.reasons, goldChecked: grade.body.goldChecked, checklist: grade.body.checklist, zgNote };
+  const reportBody = { reasons: grade.reasons, goldChecked: grade.body.goldChecked, checklist: grade.body.checklist, zgNote, zgVerdict, zgDisagrees: zgVerdict !== null && zgVerdict !== "unknown" && (zgVerdict === "pass") !== grade.pass };
   grade.reportHash = `0x${createHash("sha256").update(JSON.stringify(reportBody), "utf8").digest("hex")}`;
   const id = randomUUID();
   let txId: string | null = null;

@@ -154,6 +154,10 @@ export async function submit(db: Db, worker: WorkerRow, taskId: number, submissi
   const workHash = hashBody(body);
   run(db, "INSERT INTO work (id, task_id, worker_id, body, sha256, created_at) VALUES (?, ?, ?, ?, ?, ?)", randomUUID(), taskId, worker.id, body, workHash, Date.now());
   const sent = resubmit ? await resubmitFor(BigInt(taskId), workHash) : await submitFor(BigInt(taskId), workHash);
+  // The chain call succeeded, so the escrow is in Submitted. Record that now: the indexer only learns it from the
+  // mirror node seconds later, and gradeTask refuses tasks that are not Submitted, so auto QA would otherwise
+  // wait for the 10 s QA loop. The indexer applies the same fields (plus the deadline and schedule) idempotently.
+  run(db, "UPDATE tasks SET state = 'Submitted', work_hash = ?, updated_at = ? WHERE task_id = ?", workHash, Date.now(), taskId);
   const batch = get<BatchRow>(db, "SELECT * FROM batches WHERE id = ?", task.batch_id);
   let qa: SubmitResponse["qa"];
   if (batch?.qa_mode === "auto") {

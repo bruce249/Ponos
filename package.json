@@ -27,6 +27,7 @@
     "deploy:escrow": "tsx --env-file-if-exists=.env scripts/deploy-escrow.ts",
     "demo-seed": "tsx --env-file-if-exists=.env scripts/demo-seed.ts",
     "demo:frozen-transfer": "tsx --env-file-if-exists=.env scripts/frozen-transfer.ts",
+    "withdraw": "tsx --env-file-if-exists=.env scripts/withdraw-unclaimed.ts",
     "e2e": "tsx --env-file-if-exists=.env scripts/e2e.ts",
     "buy-nav": "tsx --env-file-if-exists=.env scripts/buy-nav.ts",
     "score": "tsx --env-file-if-exists=.env scripts/score.ts",

@@ -14,7 +14,7 @@ import { baseToDecimal, decimalToBase } from "@byline-work/shared";
 import { evmAddressFromKey, requireRole } from "../apps/api/src/chain";
 import { metaSet, openDb } from "../apps/api/src/db";
 import { transferBusd } from "../apps/api/src/escrow";
-import { burn, cashIn, freezeAccount, grantKyc, missing, pauseToken, reserveAmount, setReserve, unfreezeAccount, unpauseToken, wipe } from "./client";
+import { associateAccount, burn, cashIn, ensureKyc, freezeAccount, missing, pauseToken, reserveAmount, setReserve, unfreezeAccount, unpauseToken, wipe } from "./client";
 
 function token(): string {
   return (process.env.BUSD_TOKEN_ID ?? "").trim();
@@ -57,7 +57,57 @@ export async function deposit(targetId: string, amountDecimal: string): Promise<
 export async function kyc(targetId: string): Promise<string> {
   const absent = missing(["BUSD_TOKEN_ID", "COMPLIANCE_ACCOUNT_ID", "COMPLIANCE_PRIVATE_KEY"]);
   if (absent.length) throw new Error(`kyc is not configured: ${absent.join(", ")}`);
-  return grantKyc(targetId, token());
+  // KYC can only be granted to an associated account. Associating needs that account's own key,
+  // so it is done here only for accounts whose key is in .env (role accounts). A worker account
+  // that is not in .env has to associate itself first.
+  const key = keyForAccount(targetId);
+  if (key) await associateAccount(targetId, key, token());
+  return ensureKyc(targetId, token());
+}
+
+/** The private key in .env for a Hedera account id, if it is one of our role accounts. */
+export function keyForAccount(accountId: string): string | null {
+  for (const [name, value] of Object.entries(process.env)) {
+    if (!name.endsWith("_ACCOUNT_ID") || (value ?? "").trim() !== accountId) continue;
+    const key = (process.env[name.replace(/_ACCOUNT_ID$/, "_PRIVATE_KEY")] ?? "").trim();
+    if (key) return key;
+  }
+  return null;
+}
+
+/** `LAB` and `0.0.123` both work on the command line. */
+export function resolveAccount(input: string | undefined, what: string): string {
+  const v = (input ?? "").trim();
+  if (!v) throw new Error(`${what} is required (a 0.0.x account id or a role name such as LAB).`);
+  if (/^\d+\.\d+\.\d+$/.test(v)) return v;
+  const id = (process.env[`${v.toUpperCase()}_ACCOUNT_ID`] ?? "").trim();
+  if (!id) throw new Error(`${what} "${v}" is neither an account id nor a role in .env (${v.toUpperCase()}_ACCOUNT_ID).`);
+  return id;
+}
+
+/**
+ * TOK-02. Mint without raising the reserve first. Stablecoin Studio must refuse once supply would
+ * exceed the reserve. Returns the refusal, or throws if the mint went through (that would be a
+ * stablecoin with unbacked supply, so it is reported loudly).
+ */
+export async function overmint(targetId: string, amountDecimal: string): Promise<{ refused: true; reason: string }> {
+  const absent = missing(["BUSD_TOKEN_ID", "CASHIN_ACCOUNT_ID", "CASHIN_PRIVATE_KEY", "SCS_ADMIN_ACCOUNT_ID", "SCS_ADMIN_PRIVATE_KEY"]);
+  if (absent.length) throw new Error(`overmint is not configured: ${absent.join(", ")}`);
+  const supplyBefore = await supplyOf(token());
+  try {
+    const tx = await cashIn(targetId, amountDecimal, token());
+    throw new Error(`UNBACKED MINT SUCCEEDED (${tx}). Supply now exceeds the reserve: the reserve check is not enforced. Supply was ${supplyBefore}.`);
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
+    if (message.startsWith("UNBACKED MINT SUCCEEDED")) throw e;
+    return { refused: true, reason: message };
+  }
+}
+
+async function supplyOf(tokenId: string): Promise<string> {
+  const r = await fetch(`https://testnet.mirrornode.hedera.com/api/v1/tokens/${tokenId}`);
+  const d = (await r.json()) as { total_supply?: string };
+  return d.total_supply ?? "?";
 }
 
 export async function freeze(targetId: string): Promise<string> {
@@ -127,28 +177,37 @@ export async function redeem(holderAccountId: string, holderPrivateKey: string, 
   };
 }
 
+function amountArg(v: string | undefined): string {
+  const s = (v ?? "").trim();
+  if (!/^\d+(\.\d{1,6})?$/.test(s) || Number(s) <= 0) throw new Error(`amount must be a positive bUSD amount with at most 6 decimals, got "${v ?? ""}".`);
+  return s;
+}
+
 async function main() {
   const [cmd, a, b] = process.argv.slice(2);
   try {
     if (cmd === "deposit") {
-      const r = await deposit(a ?? "", b ?? "");
+      const r = await deposit(resolveAccount(a, "account"), amountArg(b));
       console.log(`reserve tx: ${r.reserveTx}`);
       console.log(`cash-in tx: ${r.cashInTx}`);
-    } else if (cmd === "kyc") console.log(await kyc(a ?? ""));
-    else if (cmd === "freeze") console.log(await freeze(a ?? ""));
-    else if (cmd === "unfreeze") console.log(await unfreeze(a ?? ""));
+    } else if (cmd === "overmint") {
+      const r = await overmint(resolveAccount(a, "account"), amountArg(b));
+      console.log(`refused, as it should be: ${r.reason}`);
+    } else if (cmd === "kyc") console.log(await kyc(resolveAccount(a, "account")));
+    else if (cmd === "freeze") console.log(await freeze(resolveAccount(a, "account")));
+    else if (cmd === "unfreeze") console.log(await unfreeze(resolveAccount(a, "account")));
     else if (cmd === "pause") console.log(await pause());
     else if (cmd === "unpause") console.log(await unpause());
     else if (cmd === "redeem") {
       const key = process.env.REDEEM_PRIVATE_KEY || process.env.WORKER_A_PRIVATE_KEY || "";
       if (!key) throw new Error("Set REDEEM_PRIVATE_KEY or WORKER_A_PRIVATE_KEY for the holder.");
-      const r = await redeem(a ?? "", key, b ?? "");
+      const r = await redeem(resolveAccount(a, "account"), key, amountArg(b));
       console.log(r.path.join(" -> "));
       console.log(`transfer: ${r.transferTx}`);
       console.log(`${r.wiped ? "wipe" : "burn"}: ${r.burnTx}`);
       console.log(`reserve: ${r.reserveTx}`);
     } else {
-      console.error("usage: lifecycle.ts deposit|kyc|freeze|unfreeze|pause|unpause|redeem");
+      console.error("usage: lifecycle.ts deposit <account> <bUSD> | overmint <account> <bUSD> | kyc|freeze|unfreeze <account> | pause | unpause | redeem <account> <bUSD>  (account: 0.0.x or a role such as LAB)");
       process.exit(1);
     }
   } catch (e: unknown) {

@@ -42,6 +42,25 @@ export const CONFIG_VERSION = 1;
 
 const MIRROR = "https://testnet.mirrornode.hedera.com/api/v1/";
 
+/**
+ * Retry on a flaky public JSON-RPC relay (502/503/504, SERVER_ERROR). Only for operations that are safe to
+ * repeat. Never wrap cashIn, burn or wipe: a retry after an ambiguous failure could mint or burn twice.
+ */
+async function retrying<T>(fn: () => Promise<T>, attempts = 4): Promise<T> {
+  let last: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (e: unknown) {
+      last = e;
+      const msg = e instanceof Error ? e.message : String(e);
+      if (!/\b50[234]\b|SERVER_ERROR|Bad Gateway|ETIMEDOUT|ECONNRESET/.test(msg) || i === attempts - 1) throw e;
+      await new Promise((r) => setTimeout(r, 2000 * (i + 1)));
+    }
+  }
+  throw last;
+}
+
 export function need(name: string): string {
   const v = (process.env[name] ?? "").trim();
   if (!v) throw new Error(`Missing ${name}. See .env.example. No token id is invented.`);
@@ -178,13 +197,16 @@ export async function addTinyHbarFee(tokenId: string): Promise<string> {
 }
 
 export async function reserveAmount(tokenId: string): Promise<string> {
+  // The SDK reads its mirror-node config from the connected session. Without a connect this
+  // throws "Cannot read properties of undefined (reading 'baseUrl')".
+  await connectEnv("SCS_ADMIN");
   const balance = await ReserveDataFeed.getReserveAmount(new GetReserveAmountRequest({ tokenId }));
   return balance.value.toString();
 }
 
 export async function setReserve(reserveAddress: string, amountDecimal: string): Promise<string> {
   await connectEnv("SCS_ADMIN");
-  const result = await ReserveDataFeed.updateReserveAmount(new UpdateReserveAmountRequest({ reserveAddress, reserveAmount: amountDecimal }));
+  const result = await retrying(() => ReserveDataFeed.updateReserveAmount(new UpdateReserveAmountRequest({ reserveAddress, reserveAmount: amountDecimal })));
   return result.transactionId ?? "";
 }
 
@@ -196,31 +218,31 @@ export async function cashIn(targetId: string, amountDecimal: string, tokenId: s
 
 export async function grantKyc(targetId: string, tokenId: string): Promise<string> {
   await connectEnv("COMPLIANCE");
-  const result = await StableCoin.grantKyc(new KYCRequest({ targetId, tokenId }));
+  const result = await retrying(() => StableCoin.grantKyc(new KYCRequest({ targetId, tokenId })));
   return result.transactionId ?? "";
 }
 
 export async function freezeAccount(targetId: string, tokenId: string): Promise<string> {
   await connectEnv("COMPLIANCE");
-  const result = await StableCoin.freeze(new FreezeAccountRequest({ targetId, tokenId }));
+  const result = await retrying(() => StableCoin.freeze(new FreezeAccountRequest({ targetId, tokenId })));
   return result.transactionId ?? "";
 }
 
 export async function unfreezeAccount(targetId: string, tokenId: string): Promise<string> {
   await connectEnv("COMPLIANCE");
-  const result = await StableCoin.unFreeze(new FreezeAccountRequest({ targetId, tokenId }));
+  const result = await retrying(() => StableCoin.unFreeze(new FreezeAccountRequest({ targetId, tokenId })));
   return result.transactionId ?? "";
 }
 
 export async function pauseToken(tokenId: string): Promise<string> {
   await connectEnv("SCS_ADMIN");
-  const result = await StableCoin.pause(new PauseRequest({ tokenId }));
+  const result = await retrying(() => StableCoin.pause(new PauseRequest({ tokenId })));
   return result.transactionId ?? "";
 }
 
 export async function unpauseToken(tokenId: string): Promise<string> {
   await connectEnv("SCS_ADMIN");
-  const result = await StableCoin.unPause(new PauseRequest({ tokenId }));
+  const result = await retrying(() => StableCoin.unPause(new PauseRequest({ tokenId })));
   return result.transactionId ?? "";
 }
 
