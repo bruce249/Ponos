@@ -62,8 +62,8 @@ Record each decision here, with the spike's tx IDs, before Phase 1 starts.
 | D1 | **Decided: `hip1215`** | `ESCROW_SCHEDULING=hip1215` (default, inside the contract) with a 6 s buffer after the deadline. `sdk` and `keeper` stay as fallbacks, and the keeper runs in every mode. | `npm run e2e` still fails if a schedule does not fire and only the keeper paid (set `E2E_ALLOW_KEEPER_FALLBACK=1` to accept that), so the full path set is re-proved on the new escrow. |
 | D2 | Implemented | Relayer calls `claimFor` / `submitFor` / `resubmitFor` / `disputeFor`. Direct `claim` reverts above `HITL_THRESHOLD`. | — |
 | D3 | Implemented | Server-held lab key, labelled "demo custody". | — |
-| D4 | **Open** | HBAR fixed custom fee of 1 tinybar with collectors exempt (`stablecoin/client.ts`). The 3% fee lives in the contract. | Spike S4: confirm the escrow's bUSD balance after payout is exact. `e2e` asserts exact deltas. |
-| D5 | **Open** | `redeem`: transfer to treasury then burn, wipe only if burn throws (`stablecoin/lifecycle.ts`). | Spike S6 on testnet. |
+| D4 | **Decided** | HBAR fixed custom fee of 1 tinybar with collectors exempt (`stablecoin/client.ts`). The 3% fee lives in the contract. | — (S4: `e2e` saw exact bUSD deltas on all three paths) |
+| D5 | **Decided: wipe fallback is the path that works** | `redeem`: transfer to treasury then burn, wipe only if burn throws (`stablecoin/lifecycle.ts`). | Burn through the SDK failed on testnet (hashio 502, then `20016 Burn amount greater than allowed`); the wipe fallback settled and supply fell. Worth fixing the burn allowance if time allows. |
 | D6 | Implemented | New monorepo in this folder. | — |
 | D7 | Implemented | Mock bUSD and `MockScheduleService` in Foundry. | One real testnet run of every path (G2). |
 | D8 | Implemented | `release` after `disputeDeadline` pays the worker. Test: `test_dispute_timeout_pays_worker`. | — |
@@ -71,19 +71,19 @@ Record each decision here, with the spike's tx IDs, before Phase 1 starts.
 
 ### Spike record
 
-None of S1 to S8 has been run. Fill this in as each one completes.
+Fill this in as each one completes.
 
 | Spike | Result | Tx ids / links | Date |
 |---|---|---|---|
 | S1 bUSD with Stablecoin Studio | **done 2026-11-06.** Token `0.0.11340549`, proxy `0x6f0ad3a58548e1d327e6896116784beb4ddff4f3` (`0.0.11340548`), reserve `0.0.11340547`. KYC, freeze, wipe and pause keys set; supply 0, 6 decimals. Fixed HBAR fee of 1 tinybar to the treasury on chain. TOK-02 verified: a cash-in above the reserve is refused ("The reserve is less than the amount to cash in"), supply unchanged. TOK-06 verified: reserve update then cash-in of 1,000 bUSD to the lab (reserve tx `0.0.11339160@1793977318.249146545`, cash-in tx `0.0.11339161@1793977364.885333554`). A second, unused token `0.0.11340685` also exists from a duplicate create run. | [token](https://hashscan.io/testnet/token/0.0.11340549) · fee tx `0.0.11339160@1793976988.922104289` | 2026-11-06 |
 | S2 contract holds bUSD | **done 2026-11-06.** Escrow `0.0.11341621` (redeployed with the schedule buffer; the first one, `0.0.11341079`, is retired and holds 0 bUSD). `fundBatch` pulled bUSD through the ERC-20 facade (about 118–135k gas), and a release paid the worker plus the treasury and QA pool (about 148k gas). Needed an `approve` gas limit of 1.2M (measured 726,816). The constructor had to be `payable`. Deploying costs about 50 HBAR in upload fees (about 5.7 HBAR per 4 KB chunk; a short file expiry does not help). | [contract](https://hashscan.io/testnet/contract/0.0.11341621) | 2026-11-06 |
 | S3 HIP-1215 `scheduleCall` | **done 2026-11-06. It works, with a buffer.** `submit` creates a schedule (`submitFor` about 1.53M gas). Scheduled for the exact deadline it fired at consensus 339.04 but `block.timestamp` (the block's start time) was still before 339, so `releaseIfDue` returned false after 25,966 gas and nothing was paid. Scheduled `SCHEDULE_BUFFER = 6` seconds after the deadline, schedule `0.0.11341648` fired at deadline + 6 s, used 149,069 gas, emitted `TaskReleased` and three transfers, and worker A went from 40 to 80 bUSD with no API or keeper running. | schedule [`0.0.11341648`](https://hashscan.io/testnet/schedule/0.0.11341648); failed run [`0.0.11341366`](https://hashscan.io/testnet/schedule/0.0.11341366) | 2026-11-06 |
-| S3b SDK schedule | not run | | |
-| S4 custom fee on contract transfers | not run | | |
-| S5 frozen / un-KYC'd transfer | not run | | |
-| S6 redeem path | not run | | |
-| S7 x402 facilitator | not run | | |
-| S8 World ID redirect and `acr` | not run | | |
+| S3b SDK schedule | not needed (S3 passed; `sdk` stays a fallback) | | |
+| S4 custom fee on contract transfers | **done 2026-11-06.** `npm run e2e` (hip1215) passed all three paths with exact deltas: instant and timeout pay 40 bUSD, treasury 0.800040, QA pool 0.399960; approved pays 250 bUSD, treasury 5.000250, QA pool 2.499750. The 1-tinybar HBAR fee does not touch the escrow's bUSD. The timeout task was paid by its HIP-1215 schedule, not the keeper. | schedule `0x…ad1ca7` (`0.0.11345063`); HCS #1291–1295 (approved), #1298, #1299, #1314 (timeout) | 2026-11-06 |
+| S5 frozen / un-KYC'd transfer | **done 2026-11-06.** Froze the rented worker, then `demo:frozen-transfer`: HTS refused with `ACCOUNT_FROZEN_FOR_TOKEN` (contract call `CONTRACT_REVERT_EXECUTED`), balance unchanged at 10 bUSD. Unfrozen afterwards so the live fraud scene can freeze it again. The script hangs after printing nothing on the revert; stop it with Ctrl-C and read the tx on HashScan. | [transfer](https://hashscan.io/testnet/transaction/0.0.11339176-1793996646-861965955) · unfreeze `0.0.11339163@1793997109.160326016` | 2026-11-06 |
+| S6 redeem path | **done 2026-11-06, via wipe.** `lifecycle redeem WORKER_A 1`: transfer to treasury, burn failed, wipe and reserve decrease succeeded. Supply 4,000 → 3,998 bUSD (two settled redeems; a first attempt hit a hashio 502 after its transfer, so 1 bUSD sits in the treasury). | wipe `0.0.11339162@1793997188.581126786`, `0.0.11339162@1793997228.919915037` | 2026-11-06 |
+| S7 x402 facilitator | **done 2026-11-06.** Blocky402 testnet is up. `npm run buy-nav`: 402 for 100,000 tinybar to the operator, paid, EIP-191 signature verified (`0x98f6…3880`), response anchored on HCS #1362, NAV 1. | [tx](https://hashscan.io/testnet/transaction/0.0.7162784-1793996607-990961596) · [HCS #1362](https://hashscan.io/testnet/topic/0.0.11339787/message/1362) | 2026-11-06 |
+| S8 World ID redirect and `acr` | **partly done.** Production `/api/world/login` 302s to `auth.world.org` with `redirect_uri=https://ponos-byline-web.onrender.com/api/world/callback`. A full login and `acr` need a person with the World App; not run headless. | — | 2026-11-06 |
 
 ### Beyond the original plan
 

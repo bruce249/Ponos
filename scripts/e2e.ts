@@ -158,8 +158,18 @@ console.log("timeout");
   const claimed = await claim(db, worker, batch.batchId);
   const submitted = await submit(db, worker, Number(claimed.taskId), { answers: gold, checklist: { done: true } }, false);
   if (submitted.qa) die("manual batch was auto-graded");
-  await indexerTick(db);
-  const task = get<{ schedule_address: string | null; schedule_id: string | null; review_deadline: number | null }>(db, "SELECT schedule_address, schedule_id, review_deadline FROM tasks WHERE task_id = ?", Number(claimed.taskId));
+  // The mirror node trails consensus by a few seconds, so one tick can run before TaskSubmitted is visible
+  // (seen on testnet: review_deadline and schedule_address still null). Tick until the submit is indexed.
+  type Row = { schedule_address: string | null; schedule_id: string | null; review_deadline: number | null };
+  const read = () => get<Row>(db, "SELECT schedule_address, schedule_id, review_deadline FROM tasks WHERE task_id = ?", Number(claimed.taskId));
+  let task: Row | undefined;
+  for (const stop = Date.now() + 60_000; ; ) {
+    await indexerTick(db);
+    task = read();
+    if (task?.review_deadline != null || Date.now() > stop) break;
+    await sleep(3000);
+  }
+  if (task?.review_deadline == null) die("the indexer did not see TaskSubmitted within 60 s");
   const schedule = task?.schedule_id || task?.schedule_address || "";
   const zero = "0x0000000000000000000000000000000000000000";
   if (scheduling === "hip1215" && (!schedule || schedule.toLowerCase() === zero)) die("hip1215 submit did not record a schedule id");

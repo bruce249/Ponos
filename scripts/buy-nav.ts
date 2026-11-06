@@ -3,10 +3,9 @@
  * signature and the HCS feed anchor.
  *   npm run buy-nav
  */
-import { hashFeedBody, hashscanTx, verifyFeed, type Hex } from "@byline-work/shared";
+import { hashFeedBody, hashscanTx, MIRROR_NODE, verifyFeed, type HederaNetwork, type Hex } from "@byline-work/shared";
 import { createPayer } from "@byline-work/shared";
 import { privateKeyToAccount } from "viem/accounts";
-import { readTopic } from "../apps/api/src/hcs";
 import { die, missing, need } from "./lib";
 
 const absent = missing(["AGENT_ACCOUNT_ID", "AGENT_PRIVATE_KEY", "OPERATOR_ACCOUNT_ID", "FEED_SIGNER_KEY", "HCS_TOPIC_ID"]);
@@ -38,8 +37,20 @@ console.log(`signature ok ${check.signer}`);
 console.log(`tx ${paid.txId}`);
 console.log(hashscanTx(paid.txId));
 
-const topic = await readTopic(30);
-const anchor = topic.find((m) => m.kind === "feed" && m.feed === "nav" && m.hash.toLowerCase() === hashFeedBody(body).toLowerCase());
+// readTopic pages from sequence 1, so a short read never reaches a fresh anchor on a busy topic. Fetch the
+// sequence the response names, retrying while the mirror node catches up with consensus.
+if (typeof body.hcsSequence !== "number") die("paid body has no hcsSequence, so the response was not anchored");
+const mirror = MIRROR_NODE[((process.env.HEDERA_NETWORK as HederaNetwork) || "hedera:testnet")];
+let anchor: { sequence: number } | null = null;
+for (let i = 0; i < 15 && !anchor; i++) {
+  const res = await fetch(`${mirror}/api/v1/topics/${need("HCS_TOPIC_ID")}/messages/${body.hcsSequence}`, { signal: AbortSignal.timeout(20_000) });
+  if (res.ok) {
+    const m = (await res.json()) as { message: string; sequence_number: number };
+    const msg = JSON.parse(Buffer.from(m.message, "base64").toString("utf8")) as { kind?: string; feed?: string; hash?: string };
+    if (msg.kind !== "feed" || msg.feed !== "nav" || msg.hash?.toLowerCase() !== hashFeedBody(body).toLowerCase()) die(`HCS #${m.sequence_number} does not anchor this NAV response`);
+    anchor = { sequence: m.sequence_number };
+  } else await new Promise((r) => setTimeout(r, 2000));
+}
 if (!anchor) die("no HCS feed anchor matches this NAV response");
 console.log(`hcs feed anchor #${anchor.sequence}`);
 console.log(`nav ${body.nav ?? ""}`);

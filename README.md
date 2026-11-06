@@ -79,7 +79,16 @@ New in this repo: the escrow contract, the escrow client, the mirror-node indexe
 
 ## Status
 
-Written and tested locally. On testnet so far: the HCS topic, the role accounts and bUSD (token `0.0.11340549`). The escrow is deployed (`0.0.11341621`, [HashScan](https://hashscan.io/testnet/contract/0.0.11341621)) and a task has been paid by its HIP-1215 schedule with no keeper running. `npm run e2e` has not been run yet, and the source is not verified on HashScan. `forge test` (46 tests: 41 unit and fuzz, 5 invariants), `npm test` (40) and `npm run typecheck` pass, but those use a mock token and a mock schedule service. The HIP-1215 schedule call and the Stablecoin Studio SDK calls are unproven until the spikes in `BYLINE_WORK_BUILD.md` run. `npm run e2e` fails, rather than passing quietly, if the schedule does not fire and only the keeper paid.
+Live on Hedera testnet. bUSD is token `0.0.11340549`, and the escrow `0.0.11341621` is deployed and **verified** ([HashScan](https://hashscan.io/testnet/contract/0.0.11341621)). The web app is at https://ponos-byline-web.onrender.com and the API is at https://ponos-byline-api.onrender.com.
+
+Proven on testnet (2026-11-06, tx ids in `BYLINE_WORK_BUILD.md` section 2):
+
+- `npm run e2e` passes the instant, approved ($250 with the `claim_high` step-up gate) and timeout paths, with exact bUSD deltas and one HCS message per transition. The timeout task was paid by its HIP-1215 schedule, not the keeper. `e2e` fails, rather than passing quietly, if only the keeper paid.
+- `npm run buy-nav`: x402 payment through the Blocky402 facilitator, signature verified, response anchored on HCS.
+- Freeze: a frozen account's bUSD transfer is refused with `ACCOUNT_FROZEN_FOR_TOKEN`.
+- Redeem: transfer to the treasury, then wipe and a reserve decrease. The SDK burn fails on testnet, so the wipe fallback is the path in use.
+
+`forge test` (44 tests across the unit, fuzz and invariant suites), `npm test` (41) and `npm run typecheck` pass. World ID login redirects correctly in production. A full login with `acr` needs the World App and has not been run headless.
 
 ## Reviewers and large payouts
 
@@ -127,21 +136,27 @@ A World ID `sub` is stored in SQLite and rejected by the HCS schema. It is not w
 
 ## HashScan
 
-Fill these after `busd`, `topic`, and `deploy:escrow`. The scripts print the real ids.
+Live testnet deployment:
 
-| What | Env | HashScan |
-|---|---|---|
-| bUSD | `BUSD_TOKEN_ID` | `https://hashscan.io/testnet/token/<BUSD_TOKEN_ID>` |
-| Stablecoin proxy | `BUSD_SCS_PROXY` | `https://hashscan.io/testnet/contract/<BUSD_SCS_PROXY>` |
-| Reserve | `BUSD_RESERVE_ADDRESS` | `https://hashscan.io/testnet/contract/<BUSD_RESERVE_ADDRESS>` |
-| Escrow | `ESCROW_CONTRACT_ID` | `https://hashscan.io/testnet/contract/<ESCROW_CONTRACT_ID>` |
-| HCS topic | `HCS_TOPIC_ID` | `https://hashscan.io/testnet/topic/<HCS_TOPIC_ID>` |
-| A message | sequence from the API | `https://hashscan.io/testnet/topic/<HCS_TOPIC_ID>/message/<sequence>` |
-| A transaction | tx id | `https://hashscan.io/testnet/transaction/<mirror-tx-id>` |
-| A schedule | `0.0.x` from a submit | `https://hashscan.io/testnet/schedule/<schedule-id>` |
-| Operator | `OPERATOR_ACCOUNT_ID` | `https://hashscan.io/testnet/account/<OPERATOR_ACCOUNT_ID>` |
+| What | Env | Id | HashScan |
+|---|---|---|---|
+| bUSD | `BUSD_TOKEN_ID` | `0.0.11340549` | [token](https://hashscan.io/testnet/token/0.0.11340549) |
+| Stablecoin proxy | `BUSD_SCS_PROXY` | `0.0.11340548` (`0x6f0ad3a58548e1d327e6896116784beb4ddff4f3`) | [contract](https://hashscan.io/testnet/contract/0.0.11340548) |
+| Reserve | `BUSD_RESERVE_ADDRESS` | `0.0.11340547` | [contract](https://hashscan.io/testnet/contract/0.0.11340547) |
+| Escrow (verified) | `ESCROW_CONTRACT_ID` | `0.0.11341621` (`0x…ad0f35`) | [contract](https://hashscan.io/testnet/contract/0.0.11341621) |
+| HCS topic | `HCS_TOPIC_ID` | `0.0.11339787` | [topic](https://hashscan.io/testnet/topic/0.0.11339787) |
+| Operator | `OPERATOR_ACCOUNT_ID` | `0.0.11334686` | [account](https://hashscan.io/testnet/account/0.0.11334686) |
+| Lab | `LAB_ACCOUNT_ID` | `0.0.11339173` | [account](https://hashscan.io/testnet/account/0.0.11339173) |
+| Worker A | `WORKER_A_ACCOUNT_ID` | `0.0.11339174` | [account](https://hashscan.io/testnet/account/0.0.11339174) |
+| Rented worker (fraud scene) | `WORKER_RENTED_ACCOUNT_ID` | `0.0.11339176` | [account](https://hashscan.io/testnet/account/0.0.11339176) |
+| Reviewer | `REVIEWER_ACCOUNT_ID` | `0.0.11339172` | [account](https://hashscan.io/testnet/account/0.0.11339172) |
+| Treasury | `TREASURY_ACCOUNT_ID` | `0.0.11339164` | [account](https://hashscan.io/testnet/account/0.0.11339164) |
+| QA pool | `QA_POOL_ACCOUNT_ID` | `0.0.11339165` | [account](https://hashscan.io/testnet/account/0.0.11339165) |
+| x402 agent | `AGENT_ACCOUNT_ID` | `0.0.11339178` | [account](https://hashscan.io/testnet/account/0.0.11339178) |
 
-The contract is **not verified on HashScan yet**. After `deploy:escrow`, verify the source through HashScan's contract verification and add the link above. This README does not invent that link.
+A message is `https://hashscan.io/testnet/topic/0.0.11339787/message/<sequence>`, a schedule is `https://hashscan.io/testnet/schedule/<schedule-id>`.
+
+`EscrowVault` is **verified** (Sourcify `exact_match`, chain 296), so HashScan shows the source on the [contract page](https://hashscan.io/testnet/contract/0.0.11341621). Token `0.0.11340685` is an unused duplicate from a second `busd` run. Do not point `BUSD_TOKEN_ID` at it.
 
 ## Gap 9: a release can revert and stay due
 
