@@ -8,6 +8,9 @@ import { config } from "../apps/api/src/config";
 import { openDb, run } from "../apps/api/src/db";
 import { registerWorker } from "../apps/api/src/escrow";
 import { claim, createBatch, submit } from "../apps/api/src/work";
+import { transferBusd } from "../apps/api/src/escrow";
+import { requireRole } from "../apps/api/src/chain";
+import { decimalToBase } from "@byline-work/shared";
 import { deposit, kyc } from "../stablecoin/lifecycle";
 import { die, missing, need } from "./lib";
 import { randomUUID } from "node:crypto";
@@ -57,7 +60,7 @@ run(
   "INSERT INTO workers (id, kind, label, display_name, account_id, evm_address, created_at) VALUES (?, 'demo', 'demo human', 'Pune demo', ?, ?, ?)",
   workerId, workerAccount, evm, Date.now(),
 );
-const worker = { id: workerId, kind: "demo" as const, label: "demo human", display_name: "Pune demo", world_iss: null, world_sub: null, world_acr: null, account_id: workerAccount, evm_address: evm, banned_at: null, created_at: Date.now() };
+const worker = { id: workerId, kind: "demo" as const, label: "demo human", display_name: "Pune demo", world_iss: null, world_sub: null, world_acr: null, account_id: workerAccount, evm_address: evm, chain_evm: evm, banned_at: null, created_at: Date.now() };
 
 const gold = { q1: "Pune" };
 const checklist = ["read the prompt"];
@@ -102,6 +105,27 @@ const c = await createBatch(db, {
 });
 const claimed = await claim(db, worker, c.batchId);
 const submitted = await submit(db, worker, Number(claimed.taskId), { answers: gold, checklist: { "read the prompt": true } }, false);
+
+// Fraud scene (3:35). A second demo worker holds 5 bUSD so a transfer attempt after the freeze has something to fail on.
+if (process.env.WORKER_RENTED_ACCOUNT_ID?.trim() && process.env.WORKER_RENTED_PRIVATE_KEY?.trim()) {
+  const rentedAccount = need("WORKER_RENTED_ACCOUNT_ID");
+  const rentedEvm = evmAddressFromKey(need("WORKER_RENTED_PRIVATE_KEY"));
+  console.log(`kyc ${rentedAccount}  ${await kyc(rentedAccount)}`);
+  const reg = await registerWorker(rentedEvm, rentedEvm, config.caps.inFlightNew);
+  console.log(`registerWorker (rented) ${reg.txId}`);
+  const rentedId = randomUUID();
+  run(
+    db,
+    "INSERT INTO workers (id, kind, label, display_name, account_id, evm_address, chain_evm, created_at) VALUES (?, 'demo', 'demo human', 'Rented account', ?, ?, ?, ?)",
+    rentedId, rentedAccount, rentedEvm, rentedEvm, Date.now(),
+  );
+  const funded = await transferBusd(requireRole("lab"), rentedEvm, decimalToBase("5"));
+  console.log(`lab sent 5 bUSD to the rented account  ${funded.txId}`);
+  console.log(`RENTED_WORKER_ID=${rentedId}  RENTED_ACCOUNT=${rentedAccount}`);
+  console.log(`freeze scene: POST /api/fraud {"workerId":"${rentedId}","accountId":"${rentedAccount}"}, then npm run demo:frozen-transfer`);
+} else {
+  console.log("WORKER_RENTED_* not set: the freeze scene has no account prepared.");
+}
 
 console.log("Funded: $1000 locked across three new batches (demo custody).");
 console.log(`BATCH_A=${a.batchId}  ${a.totalDecimal} bUSD  ${a.txId}`);

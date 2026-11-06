@@ -22,6 +22,7 @@ import type { Db } from "../db";
 import { all, get, metaGet, run } from "../db";
 import { mirrorGet } from "../chain";
 import { submitHcs } from "../hcs";
+import { clientStats, escrowStats } from "./stats";
 
 class LocalFacilitatorClient implements FacilitatorClient {
   constructor(private readonly f: x402Facilitator) {}
@@ -97,28 +98,10 @@ export async function navView(db: Db) {
 }
 
 export function statsView(db: Db) {
-  const byState = all<{ state: string; n: number }>(db, "SELECT state, COUNT(*) AS n FROM tasks GROUP BY state");
-  const locked = all<{ pay_per_task: string; unclaimed: number }>(db, "SELECT pay_per_task, unclaimed FROM batches");
-  let value = 0n;
-  for (const b of locked) value += BigInt(b.pay_per_task) * BigInt(b.unclaimed);
-  const open = all<{ pay_base: string | null }>(db, "SELECT pay_base FROM tasks WHERE state NOT IN ('Released','Refunded','Resolved','Expired')");
-  for (const t of open) if (t.pay_base) value += BigInt(t.pay_base);
-  const released = all<{ path: string | null; updated_at: number; review_deadline: number | null }>(db, "SELECT path, updated_at, review_deadline FROM tasks WHERE state = 'Released'");
-  const auto = released.filter((t) => t.path === "timeout" || t.path === "instant" || t.path === "dispute_timeout").length;
-  const times = released.map((t) => t.review_deadline ?? 0).filter((n) => n > 0).sort((a, b) => a - b);
-  const median = times.length ? times[Math.floor(times.length / 2)]! : null;
-  const submitted = get<{ n: number }>(db, "SELECT COUNT(*) AS n FROM task_events WHERE name = 'TaskSubmitted'")?.n ?? 0;
-  const disputed = get<{ n: number }>(db, "SELECT COUNT(*) AS n FROM task_events WHERE name IN ('TaskHeld','TaskDisputed')")?.n ?? 0;
-  return {
-    feed: "stats" as const,
-    valueLocked: value.toString(),
-    tasksByState: Object.fromEntries(byState.map((r) => [r.state, r.n])),
-    medianReviewDeadline: median,
-    autoReleaseShare: released.length ? auto / released.length : 0,
-    disputeRate: submitted ? disputed / submitted : 0,
-    ts: Math.floor(Date.now() / 1000),
-  };
+  return escrowStats(db);
 }
+
+export { clientStats };
 
 export async function signFeedBody(feed: FeedKind, body: Record<string, unknown>): Promise<Record<string, unknown>> {
   if (!config.feedSigner) throw new Error("FEED_SIGNER_KEY not set");
@@ -157,6 +140,11 @@ export function createX402(db: Db) {
     "GET /x402/fx/:pair": {
       accepts: { scheme: "exact" as const, network, payTo, price: price("/x402/fx"), maxTimeoutSeconds: 120 },
       description: "Public FX rate. USD-INR, USD-PHP, USD-NGN.",
+      mimeType: "application/json",
+    },
+    "GET /x402/client/:id/stats": {
+      accepts: { scheme: "exact" as const, network, payTo, price: price("/x402/escrow/stats"), maxTimeoutSeconds: 120 },
+      description: "A lab's funding history, median seconds to pay, share paid, and hold rate.",
       mimeType: "application/json",
     },
     "GET /x402/escrow/stats": {

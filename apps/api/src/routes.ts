@@ -23,12 +23,12 @@ import {
 import { banWorker } from "./caps";
 import { config, labAllowlist, ready, reviewerAllowlist } from "./config";
 import { evmAddressFromKey, tokenBalance } from "./chain";
-import { all, get, run, type BatchRow, type Db, type TaskRow, type WorkerRow } from "./db";
+import { all, chainEvm, get, run, type BatchRow, type Db, type TaskRow, type WorkerRow } from "./db";
 import { approveTask, holdTask, resolveTask, setWorkerStatus } from "./escrow";
 import { submitHcs } from "./hcs";
 import { readTopic } from "./hcs";
 import { fetchPublicFx, isFxPair } from "./oracle/fx";
-import { navView, reserveView, signFeedBody, statsView } from "./oracle/x402";
+import { clientStats, navView, reserveView, signFeedBody, statsView } from "./oracle/x402";
 import { MockOffRamp } from "./offramp/mock";
 import { taskMessage } from "@byline-work/shared";
 import { bindPayout, claim, createBatch, dispute, feed, httpError, links, queue, submit, taskView } from "./work";
@@ -236,7 +236,7 @@ function presentQueue(db: Db) {
   });
 }
 
-function publicScores(db: Db) {
+export function publicScores(db: Db) {
   const mapped = all<{ name: string; payload: string; created_at: number }>(db, "SELECT name, payload, created_at FROM task_events").flatMap((r) => {
     const payload = JSON.parse(r.payload) as { worker?: string; payout?: string; pay?: string; workerAmount?: string; workerBps?: string; taskId?: string };
     const task = payload.taskId ? get<{ worker_evm: string | null }>(db, "SELECT worker_evm FROM tasks WHERE task_id = ?", Number(payload.taskId)) : undefined;
@@ -578,8 +578,11 @@ export function mount(app: Hono, db: Db) {
     const desk = reviewDesk(c);
     if ("error" in desk) return desk.error;
     try {
-      const sent = await approveTask(BigInt(c.req.param("id")));
-      return c.json({ txId: sent.txId, hashscan: links({ tx: hashscanTx(sent.txId, config.hedera.network) }) });
+      // ESC-22: the desk account picks the reviewer key, so the second approval above the dual-review
+      // threshold must come from a different reviewer account (x-byline-account).
+      const as = config.roles.reviewer2.accountId && desk.accountId === config.roles.reviewer2.accountId ? "reviewer2" : "reviewer";
+      const sent = await approveTask(BigInt(c.req.param("id")), as);
+      return c.json({ txId: sent.txId, reviewer: desk.accountId, hashscan: links({ tx: hashscanTx(sent.txId, config.hedera.network) }) });
     } catch (e) {
       return fail(c, e);
     }
@@ -619,11 +622,11 @@ export function mount(app: Hono, db: Db) {
     const body = await c.req.json().catch(() => ({} as { workerId?: string; accountId?: string }));
     if (!body.workerId || !body.accountId) return c.json({ error: "workerId and accountId are required" }, 400);
     const w = get<WorkerRow>(db, "SELECT * FROM workers WHERE id = ?", body.workerId);
-    if (!w?.evm_address) return c.json({ error: "unknown worker" }, 404);
+    if (!w || !chainEvm(w)) return c.json({ error: "unknown worker" }, 404);
     try {
       const { freeze } = await import("../../../stablecoin/lifecycle");
       const freezeTx = await freeze(body.accountId);
-      const status = await setWorkerStatus(w.evm_address as `0x${string}`, false);
+      const status = await setWorkerStatus(chainEvm(w) as `0x${string}`, false);
       banWorker(db, w.id);
       const hcs = await submitHcs(taskMessage({ event: "fraud", worker: body.accountId, token: config.token.id, tx: freezeTx, ts: nowSec() }));
       return c.json({
@@ -655,8 +658,8 @@ export function mount(app: Hono, db: Db) {
       let hcsSequence: number | undefined;
       let topicId: string | undefined;
       const fraudMissing = ["BACKEND_ACCOUNT_ID", "BACKEND_PRIVATE_KEY", "ESCROW_CONTRACT_ID", "HCS_TOPIC_ID", "OPERATOR_ACCOUNT_ID", "OPERATOR_PRIVATE_KEY"].filter((k) => !(process.env[k] ?? "").trim());
-      if (w?.evm_address && fraudMissing.length === 0 && config.token.id) {
-        const status = await setWorkerStatus(w.evm_address as `0x${string}`, false);
+      if (w && chainEvm(w) && fraudMissing.length === 0 && config.token.id) {
+        const status = await setWorkerStatus(chainEvm(w) as `0x${string}`, false);
         banWorker(db, w.id);
         banned = true;
         statusTx = status.txId;
@@ -807,6 +810,12 @@ export function mount(app: Hono, db: Db) {
     if (!isFxPair(pair)) return c.json({ error: "pair must be USD-INR, USD-PHP, or USD-NGN" }, 400);
     const quote = await fetchPublicFx(pair);
     return c.json(await signFeedBody("fx", { feed: "fx", ...quote }));
+  });
+  app.get("/x402/client/:id/stats", async (c) => {
+    if (!ready.x402()) return c.json({ error: "x402 client stats feed is not configured", missing: ["FEED_SIGNER_KEY"] }, 503);
+    const id = c.req.param("id");
+    if (!/^\d+\.\d+\.\d+$/.test(id)) return c.json({ error: "client id must be a Hedera account id like 0.0.12345" }, 400);
+    return c.json(await signFeedBody("client", clientStats(db, id)));
   });
   app.get("/x402/escrow/stats", async (c) => {
     if (!ready.x402()) return c.json({ error: "x402 stats feed is not configured", missing: ["FEED_SIGNER_KEY"] }, 503);

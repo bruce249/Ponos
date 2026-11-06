@@ -89,6 +89,10 @@ contract EscrowVault {
     uint256 public hbarLowWatermark;
     uint256 public obligations;
     uint256 public taskSeq;
+    /// ESC-22. Tasks paying more than this need two distinct reviewers to approve. 0 turns the tier off.
+    /// Only the early payout is gated: silence still pays the worker at the deadline.
+    uint64 public dualReviewThreshold;
+    mapping(uint256 => address) public firstApprover;
 
     mapping(bytes32 => Batch) public batches;
     mapping(uint256 => Task) public tasks;
@@ -121,6 +125,7 @@ contract EscrowVault {
     error Reentrancy();
     error ZeroAddress();
     error BadConfig();
+    error AlreadyApproved();
 
     event BatchFunded(
         bytes32 indexed batchId,
@@ -148,6 +153,8 @@ contract EscrowVault {
     event QaPassed(uint256 indexed taskId, bytes32 indexed batchId, bytes32 reportHash, bool awaitingApproval, uint256 pay);
     event QaFailed(uint256 indexed taskId, bytes32 indexed batchId, bytes32 reasonHash, uint8 failCount, uint64 actionDeadline);
     event TaskApproved(uint256 indexed taskId, bytes32 indexed batchId);
+    event ApprovalRecorded(uint256 indexed taskId, bytes32 indexed batchId, address indexed reviewer);
+    event DualReviewThresholdSet(uint64 threshold);
     event TaskHeld(uint256 indexed taskId, bytes32 indexed batchId, bytes32 reasonHash, uint64 disputeDeadline);
     event TaskDisputed(uint256 indexed taskId, bytes32 indexed batchId, bytes32 reasonHash, uint64 disputeDeadline);
     event TaskReleased(uint256 indexed taskId, bytes32 indexed batchId, address payout, uint256 pay, uint256 fee, bytes32 path);
@@ -242,6 +249,12 @@ contract EscrowVault {
 
     function setHbarLowWatermark(uint256 next) external onlyAdmin {
         hbarLowWatermark = next;
+    }
+
+    /// ESC-22. Admin can only change how many reviewers an early payout needs, never move funds.
+    function setDualReviewThreshold(uint64 next) external onlyAdmin {
+        dualReviewThreshold = next;
+        emit DualReviewThresholdSet(next);
     }
 
     function transferAdmin(address next) external onlyAdmin {
@@ -404,6 +417,16 @@ contract EscrowVault {
     function approve(uint256 taskId) external onlyRole(REVIEWER) nonReentrant {
         Task storage t = tasks[taskId];
         if (t.state != TaskState.AwaitingApproval) revert BadState();
+        uint64 threshold = dualReviewThreshold;
+        if (threshold != 0 && batches[t.batchId].payPerTask > threshold) {
+            address first = firstApprover[taskId];
+            if (first == address(0)) {
+                firstApprover[taskId] = msg.sender;
+                emit ApprovalRecorded(taskId, t.batchId, msg.sender);
+                return;
+            }
+            if (first == msg.sender) revert AlreadyApproved();
+        }
         emit TaskApproved(taskId, t.batchId);
         _payWorker(taskId, PATH_APPROVED);
     }

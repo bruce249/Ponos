@@ -1,5 +1,5 @@
 /**
- * Indexer (~3s), keeper (15s), auto-QA retry, and the agent that buys FX over x402
+ * Indexer (~3s), keeper (15s), auto-QA retry, score tiers (60s), and the agent that buys FX over x402
  * when its keys exist. All four are idempotent and safe to restart.
  */
 import { createPayer } from "@byline-work/shared";
@@ -8,6 +8,7 @@ import type { Db } from "./db";
 import { indexerTick } from "./indexer";
 import { keeperTick } from "./keeper";
 import { qaTick } from "./qa/loop";
+import { tierTick } from "./tiers";
 import { isFxPair, rememberFx } from "./oracle/fx";
 
 export function startLoops(db: Db) {
@@ -20,6 +21,9 @@ export function startLoops(db: Db) {
   const qa = setInterval(() => {
     qaTick(db).catch((e) => console.error("[qa]", e instanceof Error ? e.message : e));
   }, 10_000);
+  const tiers = setInterval(() => {
+    tierTick(db).catch((e) => console.error("[tiers]", e instanceof Error ? e.message : e));
+  }, 60_000);
   let fx: ReturnType<typeof setInterval> | undefined;
   if (ready.agent() && ready.x402()) {
     const buy = () => buyFx(db).catch((e) => console.error("[fx]", e instanceof Error ? e.message : e));
@@ -33,6 +37,7 @@ export function startLoops(db: Db) {
     clearInterval(indexer);
     clearInterval(keeper);
     clearInterval(qa);
+    clearInterval(tiers);
     if (fx) clearInterval(fx);
   };
 }

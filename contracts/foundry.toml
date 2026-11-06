@@ -9,6 +9,6 @@ via_ir = true
 evm_version = "cancun"
 
 [invariant]
-runs = 32
-depth = 20
+runs = 256
+depth = 60
 fail_on_revert = false

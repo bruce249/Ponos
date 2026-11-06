@@ -129,6 +129,9 @@ export type TaskView = {
 
 export type ReviewQueueItem = TaskView & {
   reasonText: string | null;
+  /** ESC-22. Reviewer approvals recorded so far, and how many an early payout needs (1, or 2 above the dual-review threshold). */
+  approvals: number;
+  approvalsRequired: number;
 };
 
 export type HoldRequest = { reason: string };

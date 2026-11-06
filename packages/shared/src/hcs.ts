@@ -57,7 +57,7 @@ export type TaskMessage = {
 export type FeedMessage = {
   v: 3;
   kind: "feed";
-  feed: "reserve" | "nav" | "fx" | "stats";
+  feed: "reserve" | "nav" | "fx" | "stats" | "client";
   hash: string;
   pair?: string;
   tx?: string;
@@ -144,7 +144,7 @@ function parseTask(m: Record<string, unknown>): void {
 }
 
 function parseFeed(m: Record<string, unknown>): void {
-  if (m.feed !== "reserve" && m.feed !== "nav" && m.feed !== "fx" && m.feed !== "stats") throw new HcsSchemaError("unknown feed");
+  if (m.feed !== "reserve" && m.feed !== "nav" && m.feed !== "fx" && m.feed !== "stats" && m.feed !== "client") throw new HcsSchemaError("unknown feed");
   if (typeof m.hash !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(m.hash)) throw new HcsSchemaError("feed hash required");
   if (typeof m.ts !== "number") throw new HcsSchemaError("ts required");
 }

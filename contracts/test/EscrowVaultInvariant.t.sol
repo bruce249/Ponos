@@ -23,6 +23,7 @@ contract EscrowHandler is StdUtils {
     bytes32[] public batchIds;
     uint256 public nonce;
     uint256 public terminalViolations;
+    uint256 public minted;
     mapping(uint256 => bool) public seenTerminal;
 
     constructor(
@@ -49,6 +50,7 @@ contract EscrowHandler is StdUtils {
         bytes32 id = keccak256(abi.encode("inv-batch", nonce++, pay, count));
         uint256 total = (uint256(pay) + (uint256(pay) * 300 / 10_000)) * count;
         busd.mint(client, total);
+        minted += total;
         cheats.startPrank(client);
         busd.approve(address(vault), total);
         try vault.fundBatch(id, count, pay, 120, 120, 120) {
@@ -56,6 +58,10 @@ contract EscrowHandler is StdUtils {
         } catch {}
         cheats.stopPrank();
         _audit();
+    }
+
+    function batchCount() external view returns (uint256) {
+        return batchIds.length;
     }
 
     function claim(uint256 rawIndex) external {
@@ -167,6 +173,63 @@ contract EscrowHandler is StdUtils {
         _audit();
     }
 
+    /// Claim, submit, hold, then resolve at a random split in one call. Random single actions almost never
+    /// line these up, so without this the handler rarely reaches a resolved dispute.
+    function disputeFlow(uint256 rawIndex, uint16 rawBps) external {
+        uint256 taskId = _claimNew(rawIndex);
+        if (taskId == 0) return;
+        cheats.prank(worker);
+        try vault.submit(taskId, keccak256(abi.encode("flow", taskId))) {} catch {
+            _audit();
+            return;
+        }
+        cheats.prank(reviewer);
+        try vault.hold(taskId, keccak256("flow-hold")) {} catch {
+            _audit();
+            return;
+        }
+        cheats.prank(reviewer);
+        try vault.resolve(taskId, uint16(bound(rawBps, 0, 10_000))) {} catch {}
+        _audit();
+    }
+
+    /// Claim, submit, then pay out by QA pass (and approval above the threshold), or by timeout.
+    function payFlow(uint256 rawIndex, bool viaTimeout) external {
+        uint256 taskId = _claimNew(rawIndex);
+        if (taskId == 0) return;
+        cheats.prank(worker);
+        try vault.submit(taskId, keccak256(abi.encode("flow", taskId))) {} catch {
+            _audit();
+            return;
+        }
+        if (viaTimeout) {
+            cheats.warp(block.timestamp + 121);
+            try vault.release(taskId) {} catch {}
+        } else {
+            cheats.prank(oracle);
+            try vault.qaPass(taskId, keccak256("report")) {} catch {}
+            cheats.prank(reviewer);
+            try vault.approve(taskId) {} catch {}
+        }
+        _audit();
+    }
+
+    function _claimNew(uint256 rawIndex) internal returns (uint256 taskId) {
+        if (batchIds.length == 0) return 0;
+        bytes32 id = batchIds[bound(rawIndex, 0, batchIds.length - 1)];
+        (, uint64 pay,,,,,,) = vault.batches(id);
+        uint256 before = vault.taskSeq();
+        if (pay > vault.hitlThreshold()) {
+            cheats.prank(relayer);
+            try vault.claimFor(id, worker) returns (uint256) {} catch {}
+        } else {
+            cheats.prank(worker);
+            try vault.claim(id) returns (uint256) {} catch {}
+        }
+        uint256 afterSeq = vault.taskSeq();
+        return afterSeq > before ? afterSeq : 0;
+    }
+
     function warpForward(uint256 rawSecs) external {
         cheats.warp(block.timestamp + bound(rawSecs, 0, 7 days));
         _audit();
@@ -205,6 +268,10 @@ contract EscrowVaultInvariantTest is Test {
     MockBUSD busd;
     EscrowVault vault;
     EscrowHandler handler;
+    address clientA;
+    address payoutA;
+    address treasuryA;
+    address qaPoolA;
 
     function setUp() public {
         busd = new MockBUSD();
@@ -231,9 +298,13 @@ contract EscrowVaultInvariantTest is Test {
         vm.prank(verifier);
         vault.registerWorker(worker, payout, 20);
 
+        clientA = client;
+        payoutA = payout;
+        treasuryA = treasury;
+        qaPoolA = qaPool;
         handler = new EscrowHandler(vault, busd, client, worker, oracle, reviewer, relayer);
 
-        bytes4[] memory selectors = new bytes4[](14);
+        bytes4[] memory selectors = new bytes4[](16);
         selectors[0] = handler.fund.selector;
         selectors[1] = handler.claim.selector;
         selectors[2] = handler.submitWork.selector;
@@ -248,6 +319,8 @@ contract EscrowVaultInvariantTest is Test {
         selectors[11] = handler.expire.selector;
         selectors[12] = handler.withdraw.selector;
         selectors[13] = handler.warpForward.selector;
+        selectors[14] = handler.disputeFlow.selector;
+        selectors[15] = handler.payFlow.selector;
         targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
         targetContract(address(handler));
     }
@@ -258,5 +331,40 @@ contract EscrowVaultInvariantTest is Test {
 
     function invariant_terminal_once() public view {
         assertEq(handler.terminalViolations(), 0);
+    }
+
+    /// Every base unit ever minted is held by the vault, the client, the worker payout, the treasury or the QA pool.
+    /// Nothing is created or burned by any path, including resolve with a split and refunds.
+    function invariant_conservation() public view {
+        uint256 held = busd.balanceOf(address(vault)) + busd.balanceOf(clientA) + busd.balanceOf(payoutA)
+            + busd.balanceOf(treasuryA) + busd.balanceOf(qaPoolA);
+        assertEq(held, handler.minted());
+    }
+
+    /// Nothing is stranded: with no direct transfers into the vault, its balance is exactly what it owes.
+    /// Solvency alone (balance >= obligations) cannot see a payout that leaves a unit behind.
+    function invariant_no_stranded_funds() public view {
+        assertEq(busd.balanceOf(address(vault)), vault.obligations());
+    }
+
+    /// `obligations` is exactly the locked value: every unclaimed task plus every task that has not reached a terminal state.
+    function invariant_obligations_match_locked_value() public view {
+        uint256 expected;
+        uint256 batchCount = handler.batchCount();
+        for (uint256 i = 0; i < batchCount; i++) {
+            (, uint64 pay,, uint32 unclaimed,,,,) = vault.batches(handler.batchIds(i));
+            expected += uint256(unclaimed) * (uint256(pay) + uint256(pay) * FEE_BPS / 10_000);
+        }
+        uint256 seq = vault.taskSeq();
+        for (uint256 t = 1; t <= seq; t++) {
+            (bytes32 batchId, EscrowVault.TaskState state,,,,,,,,,,,,) = vault.tasks(t);
+            if (
+                state == EscrowVault.TaskState.Released || state == EscrowVault.TaskState.Refunded
+                    || state == EscrowVault.TaskState.Resolved || state == EscrowVault.TaskState.Expired
+            ) continue;
+            (, uint64 pay,,,,,,) = vault.batches(batchId);
+            expected += uint256(pay) + uint256(pay) * FEE_BPS / 10_000;
+        }
+        assertEq(vault.obligations(), expected);
     }
 }

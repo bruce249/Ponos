@@ -17,6 +17,7 @@ const plan = [
   { name: "BACKEND", hbar: 30 },
   { name: "QA_ORACLE", hbar: 10 },
   { name: "REVIEWER", hbar: 5 },
+  { name: "REVIEWER2", hbar: 5 },
   { name: "LAB", hbar: 10 },
   { name: "WORKER_A", hbar: 1 },
   { name: "WORKER_B", hbar: 1 },

@@ -500,6 +500,93 @@ contract EscrowVaultTest is Test {
         scheduled.submit(taskId, keccak256("work"));
     }
 
+    // ---------- ESC-22: two reviewers above the dual-review threshold ----------
+
+    uint64 constant DUAL = 1_000_000_000; // 1,000 bUSD
+    address reviewer2 = makeAddr("reviewer2");
+
+    function _awaitingApproval(uint64 pay) internal returns (uint256 taskId) {
+        bytes32 id = _fund(vault, pay, 1);
+        taskId = _claimFor(id, worker);
+        _submit(taskId, worker, keccak256("work"));
+        vm.prank(oracle);
+        vault.qaPass(taskId, keccak256("report"));
+        assertEq(_state(taskId), uint256(EscrowVault.TaskState.AwaitingApproval));
+    }
+
+    function _enableDual() internal {
+        bytes32 role = vault.REVIEWER();
+        vm.startPrank(admin);
+        vault.setDualReviewThreshold(DUAL);
+        vault.grantRole(role, reviewer2);
+        vm.stopPrank();
+    }
+
+    function test_dual_review_needs_two_distinct_reviewers() public {
+        _enableDual();
+        uint256 taskId = _awaitingApproval(DUAL + 1_000_000);
+
+        vm.prank(reviewer);
+        vault.approve(taskId);
+        assertEq(_state(taskId), uint256(EscrowVault.TaskState.AwaitingApproval));
+        assertEq(busd.balanceOf(payout), 0);
+        assertEq(vault.firstApprover(taskId), reviewer);
+
+        vm.prank(reviewer);
+        vm.expectRevert(EscrowVault.AlreadyApproved.selector);
+        vault.approve(taskId);
+
+        vm.prank(reviewer2);
+        vault.approve(taskId);
+        assertEq(_state(taskId), uint256(EscrowVault.TaskState.Released));
+        assertEq(busd.balanceOf(payout), DUAL + 1_000_000);
+        assertEq(busd.balanceOf(address(vault)), 0);
+    }
+
+    function test_dual_review_at_threshold_needs_one() public {
+        _enableDual();
+        uint256 taskId = _awaitingApproval(DUAL);
+        vm.prank(reviewer);
+        vault.approve(taskId);
+        assertEq(_state(taskId), uint256(EscrowVault.TaskState.Released));
+    }
+
+    function test_dual_review_off_by_default() public {
+        uint256 taskId = _awaitingApproval(DUAL + 1_000_000);
+        assertEq(vault.dualReviewThreshold(), 0);
+        vm.prank(reviewer);
+        vault.approve(taskId);
+        assertEq(_state(taskId), uint256(EscrowVault.TaskState.Released));
+    }
+
+    function test_dual_review_silence_still_pays_the_worker() public {
+        _enableDual();
+        uint256 taskId = _awaitingApproval(DUAL + 1_000_000);
+        vm.prank(reviewer);
+        vault.approve(taskId); // only one of two
+        (,,,, uint64 reviewDeadline) = _deadlines(taskId);
+        vm.warp(reviewDeadline);
+        vault.release(taskId);
+        assertEq(_state(taskId), uint256(EscrowVault.TaskState.Released));
+        assertEq(busd.balanceOf(payout), DUAL + 1_000_000);
+    }
+
+    function test_dual_review_hold_after_first_approval() public {
+        _enableDual();
+        uint256 taskId = _awaitingApproval(DUAL + 1_000_000);
+        vm.prank(reviewer);
+        vault.approve(taskId);
+        vm.prank(reviewer2);
+        vault.hold(taskId, keccak256("concern"));
+        assertEq(_state(taskId), uint256(EscrowVault.TaskState.Disputed));
+    }
+
+    function test_only_admin_sets_dual_threshold() public {
+        vm.prank(client);
+        vm.expectRevert(EscrowVault.NotAdmin.selector);
+        vault.setDualReviewThreshold(1);
+    }
+
     function testFuzz_resolve_conserves(uint64 rawPay, uint16 rawBps) public {
         uint64 pay = uint64(bound(rawPay, 1, 1_000_000_000_000));
         uint16 bps = uint16(bound(rawBps, 0, 10_000));

@@ -2,7 +2,7 @@
 
 Companion to [BYLINE_WORK.md](BYLINE_WORK.md). The spec says what we are building. This file says in what order, what "done" means at each step, and which gaps in the spec we close before writing code.
 
-Status: planning, 2026-11-06. Nothing is built in this folder yet.
+Status, 2026-11-06: **code written and tested locally, not yet run on testnet.** Contracts (46 Foundry tests: 41 unit and fuzz, 5 invariants), the API, the web app, the stablecoin scripts and the x402 service exist and pass `forge test`, `npm test` (40) and `npm run typecheck`. No `.env`, accounts, bUSD token, escrow deployment or HCS topic exist yet, so gates G0, G1 (testnet half), G2, G4 and G6 are open. See [section 2](#2-decisions-to-make-before-code) for the decision log and `npm run preflight` for what each testnet step still needs.
 
 ---
 
@@ -26,8 +26,8 @@ Status: planning, 2026-11-06. Nothing is built in this folder yet.
 
 ## 1. Starting point
 
-- **This folder** has only `BYLINE_WORK.md`.
-- **v2 code** lives in `../ETHGM/Build`: an npm-workspaces monorepo with a Hono API, a Next 16 web app, `node:sqlite`, `@hiero-ledger/sdk` 2.90.1 and `@x402/hedera` 2.30.0. `../Build` is an older copy without the v2 moderation and review work. `BYLINE_V2.md` is at `../ETHGM/Build/BYLINE_V2.md`, so the relative link in the spec is broken from this folder.
+- **This folder** is the new monorepo (decision D6): `contracts/`, `stablecoin/`, `packages/shared`, `apps/api`, `apps/web`, `scripts/`. `BYLINE_V2.md` is copied in so the spec's link resolves.
+- **v2 code** lives in `../ETHGM/Build`: an npm-workspaces monorepo with a Hono API, a Next 16 web app, `node:sqlite`, `@hiero-ledger/sdk` 2.90.1 and `@x402/hedera` 2.30.0. `../Build` is an older copy without the v2 moderation and review work. The v2 repo is not on this machine, so the ported modules were written from the v2 shapes, not copied from its files.
 - **Reusable from v2, already working:** World ID OIDC login and step-up with single-use approvals, HCS submit and mirror-node reads, an x402 resource server on `hedera:testnet` (Blocky402 or an in-process facilitator), the x402 payer client, the 0G Private Computer client with TEE verification, the account and topic scripts, and the reviewer-queue UI pattern.
 - **New for Byline Work (nothing to reuse):** Solidity (v2 has no contracts), Stablecoin Studio, scheduled releases, HTS token operations (KYC, freeze, custom fees, burn), a contract event indexer, and a keeper.
 - **Toolchain:** Node 24.13 is installed. Foundry is not on PATH on this machine. The sibling projects AFTERMATH and BLACKOUT use Foundry, so we install it here too.
@@ -54,6 +54,46 @@ Two Hedera facts change the design slightly from the spec:
 | D9 | Platform fee on refunds and splits | Keep the fee, or refund it | Charge the fee only on the amount actually paid to the worker. Refund the rest to the client. | Team |
 
 Record each decision here, with the spike's tx IDs, before Phase 1 starts.
+
+### Decision log
+
+| # | Status | What the code does now | Still needed |
+|---|---|---|---|
+| D1 | **Open** | `ESCROW_SCHEDULING` = `hip1215` (default, inside the contract), `sdk` (`schedule.ts`) or `keeper`. The keeper runs in every mode. | Spike S3 on testnet. `npm run e2e` now fails if a schedule does not fire and only the keeper paid (set `E2E_ALLOW_KEEPER_FALLBACK=1` to accept that). Write the result and tx ids here. |
+| D2 | Implemented | Relayer calls `claimFor` / `submitFor` / `resubmitFor` / `disputeFor`. Direct `claim` reverts above `HITL_THRESHOLD`. | — |
+| D3 | Implemented | Server-held lab key, labelled "demo custody". | — |
+| D4 | **Open** | HBAR fixed custom fee of 1 tinybar with collectors exempt (`stablecoin/client.ts`). The 3% fee lives in the contract. | Spike S4: confirm the escrow's bUSD balance after payout is exact. `e2e` asserts exact deltas. |
+| D5 | **Open** | `redeem`: transfer to treasury then burn, wipe only if burn throws (`stablecoin/lifecycle.ts`). | Spike S6 on testnet. |
+| D6 | Implemented | New monorepo in this folder. | — |
+| D7 | Implemented | Mock bUSD and `MockScheduleService` in Foundry. | One real testnet run of every path (G2). |
+| D8 | Implemented | `release` after `disputeDeadline` pays the worker. Test: `test_dispute_timeout_pays_worker`. | — |
+| D9 | Implemented | Fee only on the worker's paid share. Tests: fuzz conservation, `resolve` split. | — |
+
+### Spike record
+
+None of S1 to S8 has been run. Fill this in as each one completes.
+
+| Spike | Result | Tx ids / links | Date |
+|---|---|---|---|
+| S1 bUSD with Stablecoin Studio | not run | | |
+| S2 contract holds bUSD | not run | | |
+| S3 HIP-1215 `scheduleCall` | not run | | |
+| S3b SDK schedule | not run | | |
+| S4 custom fee on contract transfers | not run | | |
+| S5 frozen / un-KYC'd transfer | not run | | |
+| S6 redeem path | not run | | |
+| S7 x402 facilitator | not run | | |
+| S8 World ID redirect and `acr` | not run | | |
+
+### Beyond the original plan
+
+Added while closing gaps, so the plan and the code stay in step:
+
+- **ESC-22 dual review**: `setDualReviewThreshold` (admin, default off). Above it, an early payout needs two distinct reviewers; silence still pays at the deadline. A second reviewer account is `REVIEWER2_*`.
+- **X4-06**: `GET /x402/client/:id/stats`.
+- **SCR-05**: score tiers raise the in-flight cap (`apps/api/src/tiers.ts`, 60 s loop). Banned workers are skipped because `registerWorker` also sets `active = true`.
+- **`chain_evm`**: a worker's on-chain identity is stored separately from their payout address. Before this, one payout change would have made `claimFor` use an address the escrow never registered.
+- **Stats fix**: "median time to pay" was the median of deadline timestamps. It is now the median of seconds from first submit to payout.
 
 ---
 

@@ -66,3 +66,13 @@ test("scoresFromEvents reads only public events and ignores a missing worker sub
   assert.ok(rows[0]!.score > rows[1]!.score);
   assert.equal(rows[1]?.disputesLost, 1);
 });
+
+test("score tiers raise the in-flight cap and never go below the base", async () => {
+  const { inFlightCapForScore } = await import("../src/score");
+  assert.equal(inFlightCapForScore(0, 2), 2);
+  assert.equal(inFlightCapForScore(19.9, 2), 2);
+  assert.equal(inFlightCapForScore(20, 2), 4);
+  assert.equal(inFlightCapForScore(55, 2), 8);
+  assert.equal(inFlightCapForScore(99, 2), 12);
+  assert.equal(inFlightCapForScore(99, 20), 20);
+});

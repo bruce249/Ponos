@@ -4,7 +4,7 @@
  */
 import { keccak256, recoverMessageAddress, stringToBytes, type Hex } from "viem";
 
-export type FeedKind = "reserve" | "nav" | "fx" | "stats";
+export type FeedKind = "reserve" | "nav" | "fx" | "stats" | "client";
 
 export type FeedStatement = {
   feed: FeedKind;

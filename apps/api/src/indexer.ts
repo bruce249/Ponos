@@ -40,7 +40,7 @@ function accountOf(db: Db, evm: string | undefined): string | undefined {
   if (!evm || evm.toLowerCase() === ZERO) return undefined;
   const known = knownAccountByEvm(evm);
   if (known) return known;
-  const row = get<{ account_id: string | null }>(db, "SELECT account_id FROM workers WHERE lower(evm_address) = ?", evm.toLowerCase());
+  const row = get<{ account_id: string | null }>(db, "SELECT account_id FROM workers WHERE lower(COALESCE(chain_evm, evm_address)) = ?", evm.toLowerCase());
   return row?.account_id || evm;
 }
 
@@ -131,7 +131,7 @@ const HCS_NAME: Record<string, TaskEventName | undefined> = {
   UnclaimedWithdrawn: "withdrawn",
 };
 
-function project(db: Db, name: string, args: Record<string, unknown>, txId: string) {
+export function project(db: Db, name: string, args: Record<string, unknown>, txId: string) {
   const now = Date.now();
   const taskId = args.taskId !== undefined ? num(args.taskId as bigint) : null;
   const batchId = typeof args.batchId === "string" ? (args.batchId as Hex) : null;
@@ -165,7 +165,7 @@ function project(db: Db, name: string, args: Record<string, unknown>, txId: stri
         taskId, batchId, String(args.worker), String(args.payout), num(args.workDeadline as bigint), str(args.pay as bigint), now,
       );
       run(db, "UPDATE batches SET unclaimed = CASE WHEN unclaimed > 0 THEN unclaimed - 1 ELSE 0 END WHERE id = ?", batchId);
-      const worker = get<{ id: string }>(db, "SELECT id FROM workers WHERE lower(evm_address) = ?", String(args.worker).toLowerCase());
+      const worker = get<{ id: string }>(db, "SELECT id FROM workers WHERE lower(COALESCE(chain_evm, evm_address)) = ?", String(args.worker).toLowerCase());
       if (worker) run(db, "UPDATE tasks SET worker_id = ? WHERE task_id = ?", worker.id, taskId);
       const item = get<{ idx: number }>(db, "SELECT idx FROM batch_items WHERE batch_id = ? AND task_id IS NULL ORDER BY idx LIMIT 1", batchId);
       if (item) run(db, "UPDATE batch_items SET task_id = ? WHERE batch_id = ? AND idx = ?", taskId, batchId, item.idx);

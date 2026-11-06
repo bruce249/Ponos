@@ -10,7 +10,7 @@ import { encodeAbiParameters, keccak256, parseAbiParameters, stringToBytes, type
 import { parseHederaKey } from "@byline-work/shared";
 import { config } from "../apps/api/src/config";
 import { evmAddressFromKey } from "../apps/api/src/chain";
-import { grantRole, associateEscrowToken } from "../apps/api/src/escrow";
+import { grantRole, associateEscrowToken, setDualReviewThreshold } from "../apps/api/src/escrow";
 import { die, missing, need } from "./lib";
 
 const absent = missing([
@@ -106,6 +106,19 @@ for (const [hash, account] of [
 ] as const) {
   const granted = await grantRole(hash, account);
   console.log(`# grant ${account} tx ${granted.txId}`);
+}
+const reviewer2Key = process.env.REVIEWER2_PRIVATE_KEY?.trim();
+if (reviewer2Key) {
+  const granted = await grantRole(role("REVIEWER"), evmAddressFromKey(reviewer2Key));
+  console.log(`# grant reviewer2 tx ${granted.txId}`);
+  const rawDual = process.env.DUAL_REVIEW_THRESHOLD || "1000";
+  const dualBase = BigInt(rawDual) >= 1_000_000n || BigInt(rawDual) === 0n ? BigInt(rawDual) : BigInt(rawDual) * 1_000_000n;
+  if (dualBase > 0n) {
+    const set = await setDualReviewThreshold(dualBase);
+    console.log(`# dual review above ${dualBase} base units tx ${set.txId}`);
+  }
+} else {
+  console.log("# REVIEWER2_PRIVATE_KEY not set: dual review (ESC-22) stays off.");
 }
 client.close();
 

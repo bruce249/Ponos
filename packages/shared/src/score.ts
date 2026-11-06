@@ -115,3 +115,15 @@ export function scoresFromEvents(events: PublicTaskEvent[], global?: { passes: n
   out.sort((a, b) => b.score - a.score);
   return out;
 }
+
+/** SCR-05. In-flight task cap by Contributor Score. A new worker keeps the base cap. A tier never lowers it. */
+export const SCORE_TIERS: readonly { minScore: number; cap: number }[] = [
+  { minScore: 80, cap: 12 },
+  { minScore: 50, cap: 8 },
+  { minScore: 20, cap: 4 },
+];
+
+export function inFlightCapForScore(score: number, baseCap: number): number {
+  const tier = SCORE_TIERS.find((t) => score >= t.minScore);
+  return Math.max(baseCap, tier?.cap ?? baseCap);
+}

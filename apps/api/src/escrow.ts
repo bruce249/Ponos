@@ -160,8 +160,9 @@ export async function qaFail(taskId: bigint, reasonHash: Hex) {
   return executeContract({ ...qa, contractId: escrowId(), abi: escrowAbi, functionName: "qaFail", args: [taskId, reasonHash], gas: 400_000 });
 }
 
-export async function approveTask(taskId: bigint) {
-  const reviewer = requireRole("reviewer");
+/** `as` picks which server-held reviewer key signs. Above DUAL_REVIEW_THRESHOLD two distinct reviewers must approve. */
+export async function approveTask(taskId: bigint, as: "reviewer" | "reviewer2" = "reviewer") {
+  const reviewer = requireRole(as);
   return executeContract({ ...reviewer, contractId: escrowId(), abi: escrowAbi, functionName: "approve", args: [taskId], gas: 800_000 });
 }
 
@@ -193,6 +194,11 @@ export async function refundTask(taskId: bigint) {
 export async function associateEscrowToken() {
   const admin = requireRole("escrowAdmin");
   return executeContract({ ...admin, contractId: escrowId(), abi: escrowAbi, functionName: "associateToken", args: [], gas: 800_000 });
+}
+
+export async function setDualReviewThreshold(base: bigint) {
+  const admin = requireRole("escrowAdmin");
+  return executeContract({ ...admin, contractId: escrowId(), abi: escrowAbi, functionName: "setDualReviewThreshold", args: [base], gas: 200_000 });
 }
 
 export async function grantRole(role: Hex, account: Hex) {

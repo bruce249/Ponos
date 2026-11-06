@@ -113,7 +113,7 @@ function ReviewCard({ item, onDone }: { item: ReviewItem; onDone: (note: FlashNo
       const path = `/api/review/${encodeURIComponent(item.taskId)}/${kind}`;
       const body = kind === "approve" ? {} : kind === "hold" ? { reason: reason.trim() } : { workerBps: bpsNum };
       const res = await api(path, { method: "POST", body: JSON.stringify(body) });
-      const title = kind === "approve" ? "Approved. The pay is released." : kind === "hold" ? "Held. The task is disputed." : `Resolved at ${bpsNum} basis points to the worker.`;
+      const title = kind === "approve" ? (item.approvalsRequired > 1 && item.approvals + 1 < item.approvalsRequired ? "Approval recorded. A second reviewer must approve before pay is released early." : "Approved. The pay is released.") : kind === "hold" ? "Held. The task is disputed." : `Resolved at ${bpsNum} basis points to the worker.`;
       onDone({ kind: "good", title, refs: chainRefs(res, item.refs) });
     } catch (e) {
       onDone({ kind: "bad", title: "Review action failed", text: errorMessage(e) });
@@ -151,6 +151,11 @@ function ReviewCard({ item, onDone }: { item: ReviewItem; onDone: (note: FlashNo
         <button className="btn sm" disabled={busy != null} onClick={() => void act("approve")}>
           {busy === "approve" ? "Approving…" : "Approve"}
         </button>
+        {item.approvalsRequired > 1 && (
+          <span className="hint">
+            Two reviewers needed above this amount: {item.approvals}/{item.approvalsRequired} approved. Silence still pays the worker at the deadline.
+          </span>
+        )}
       </div>
 
       <label htmlFor={`reason-${item.taskId}`}>Hold reason</label>

@@ -25,7 +25,8 @@ export function openDb(path: string): Db {
       world_sub TEXT,
       world_acr TEXT,
       account_id TEXT,
-      evm_address TEXT,
+      evm_address TEXT,                           -- payout address, may change
+      chain_evm TEXT,                             -- identity registered on the escrow, never changes
       banned_at INTEGER,
       created_at INTEGER NOT NULL,
       UNIQUE (world_iss, world_sub)
@@ -197,7 +198,14 @@ export function openDb(path: string): Db {
     CREATE INDEX IF NOT EXISTS claims_worker ON claims(worker_id, created_at);
     CREATE INDEX IF NOT EXISTS events_hcs ON task_events(hcs_sequence, hcs_attempts);
   `);
+  const cols = db.prepare("PRAGMA table_info(workers)").all() as { name: string }[];
+  if (!cols.some((c) => c.name === "chain_evm")) db.exec("ALTER TABLE workers ADD COLUMN chain_evm TEXT");
   return db;
+}
+
+/** The address the escrow knows this worker by. A payout change moves `evm_address` but never this. */
+export function chainEvm(w: { chain_evm: string | null; evm_address: string | null }): string | null {
+  return w.chain_evm ?? w.evm_address;
 }
 
 export function get<T>(db: Db, sql: string, ...params: unknown[]): T | undefined {
@@ -230,6 +238,7 @@ export type WorkerRow = {
   world_acr: string | null;
   account_id: string | null;
   evm_address: string | null;
+  chain_evm: string | null;
   banned_at: number | null;
   created_at: number;
 };

@@ -27,7 +27,7 @@ import {
 import { banGate, claimCapGate, recordClaim, recordDenial } from "./caps";
 import { config, labAllowlist } from "./config";
 import { accountInfo, EscrowCallError, evmAddressFromKey, NotConfigured } from "./chain";
-import { all, get, run, type BatchRow, type Db, type TaskRow, type WorkerRow } from "./db";
+import { all, chainEvm, get, run, type BatchRow, type Db, type TaskRow, type WorkerRow } from "./db";
 import { claimFor, disputeFor, fundBatch, registerWorker, resubmitFor, setWorkerPayout, submitFor } from "./escrow";
 import { scheduleLink } from "./indexer";
 import { gradeTask } from "./qa/loop";
@@ -116,7 +116,8 @@ export async function claim(db: Db, worker: WorkerRow, batchId: string, approval
   }
   const batch = get<BatchRow>(db, "SELECT * FROM batches WHERE id = ?", batchId);
   if (!batch?.funded_tx) throw Object.assign(new Error("Unknown or unfunded batch"), { status: 404 });
-  if (!worker.evm_address) throw Object.assign(new Error("Bind a payout account before claiming."), { status: 400 });
+  const onChain = chainEvm(worker);
+  if (!worker.evm_address || !onChain) throw Object.assign(new Error("Bind a payout account before claiming."), { status: 400 });
   const pay = BigInt(batch.pay_per_task);
   if (requiresStepUp(pay)) {
     if (worker.kind !== "world") throw Object.assign(new Error("Tasks over 100 bUSD need a World ID step-up. A demo human cannot claim them."), { status: 403 });
@@ -124,7 +125,7 @@ export async function claim(db: Db, worker: WorkerRow, batchId: string, approval
     const used = consumeApproval(db, approvalId, worker.id, "claim_high", batchId);
     if (!used.ok) throw Object.assign(new Error(used.detail), { status: 403, reason: used.reason });
   }
-  const sent = await claimFor(batchId as Hex, worker.evm_address as Hex);
+  const sent = await claimFor(batchId as Hex, onChain as Hex);
   const taskId = Number(sent.taskId);
   const now = Date.now();
   const deadline = Math.floor(now / 1000) + batch.work_window;
@@ -133,7 +134,7 @@ export async function claim(db: Db, worker: WorkerRow, batchId: string, approval
     `INSERT INTO tasks (task_id, batch_id, state, worker_id, worker_evm, payout, work_deadline, pay_base, fail_count, updated_at)
      VALUES (?, ?, 'Claimed', ?, ?, ?, ?, ?, 0, ?)
      ON CONFLICT(task_id) DO UPDATE SET worker_id = excluded.worker_id, worker_evm = excluded.worker_evm, payout = excluded.payout, state = 'Claimed'`,
-    taskId, batchId, worker.id, worker.evm_address, worker.evm_address, deadline, pay.toString(), now,
+    taskId, batchId, worker.id, onChain, worker.evm_address, deadline, pay.toString(), now,
   );
   run(db, "UPDATE batches SET unclaimed = CASE WHEN unclaimed > 0 THEN unclaimed - 1 ELSE 0 END WHERE id = ?", batchId);
   const item = get<{ idx: number }>(db, "SELECT idx FROM batch_items WHERE batch_id = ? AND task_id IS NULL ORDER BY idx LIMIT 1", batchId);
@@ -191,11 +192,11 @@ export async function bindPayout(db: Db, worker: WorkerRow, accountId: string, a
   const { kyc: grantKyc } = await import("../../../stablecoin/lifecycle");
   const kycTx = await grantKyc(accountId);
   const evm = info.evmAddress;
-  const already = worker.evm_address;
+  const already = chainEvm(worker);
   const sent = already
     ? await setWorkerPayout(already as Hex, evm)
     : await registerWorker(evm, evm, config.caps.inFlightNew);
-  run(db, "UPDATE workers SET account_id = ?, evm_address = ? WHERE id = ?", accountId, evm, worker.id);
+  run(db, "UPDATE workers SET account_id = ?, evm_address = ?, chain_evm = COALESCE(chain_evm, ?) WHERE id = ?", accountId, evm, already ?? evm, worker.id);
   return {
     txId: sent.txId,
     kycTx,
@@ -255,9 +256,14 @@ export function taskView(db: Db, taskId: number, viewer: WorkerRow | null): (Tas
   return view;
 }
 
-export function queue(db: Db): Array<TaskView & { reasonText: string | null }> {
+export function queue(db: Db): Array<TaskView & { reasonText: string | null; approvals: number; approvalsRequired: number }> {
   const rows = all<TaskRow>(db, "SELECT * FROM tasks WHERE state IN ('AwaitingApproval', 'Disputed') ORDER BY updated_at ASC");
-  return rows.map((t) => ({ ...taskView(db, t.task_id, null)!, reasonText: t.reason_text }));
+  return rows.map((t) => {
+    const view = taskView(db, t.task_id, null)!;
+    const approvals = get<{ n: number }>(db, "SELECT COUNT(*) AS n FROM task_events WHERE name = 'ApprovalRecorded' AND task_id = ?", t.task_id)?.n ?? 0;
+    const dual = config.escrow.dualReviewBase > 0n && BigInt(view.payBase) > config.escrow.dualReviewBase;
+    return { ...view, reasonText: t.reason_text, approvals, approvalsRequired: dual ? 2 : 1 };
+  });
 }
 
 export function httpError(e: unknown): { status: number; body: { error: string; reason?: string; txId?: string; missing?: string[]; hashscan?: string } } {

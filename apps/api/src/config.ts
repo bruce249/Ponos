@@ -40,6 +40,14 @@ function hitlBase(): bigint {
   return n >= 1_000_000n ? n : n * 1_000_000n;
 }
 
+/** DUAL_REVIEW_THRESHOLD is whole bUSD (1000). Above it, an early payout needs two reviewers. 0 turns it off. */
+function dualReviewBase(): bigint {
+  const raw = env("DUAL_REVIEW_THRESHOLD", "1000");
+  if (!/^\d+$/.test(raw)) throw new Error(`DUAL_REVIEW_THRESHOLD must be an integer, got ${raw}`);
+  const n = BigInt(raw);
+  return n === 0n || n >= 1_000_000n ? n : n * 1_000_000n;
+}
+
 function pair(prefix: string): { accountId: string; privateKey: string } {
   return { accountId: env(`${prefix}_ACCOUNT_ID`), privateKey: env(`${prefix}_PRIVATE_KEY`) };
 }
@@ -74,6 +82,7 @@ export const config = {
     address: env("ESCROW_ADDRESS"),
     scheduling: scheduling as "hip1215" | "sdk" | "keeper",
     hitlBase: hitlBase(),
+    dualReviewBase: dualReviewBase(),
     feeBps: BigInt(env("PLATFORM_FEE_BPS", "300")),
     qaBps: BigInt(env("QA_POOL_SHARE_BPS", "3333")),
     minWindow: num("MIN_WINDOW_SEC", 120),
@@ -138,6 +147,7 @@ export const config = {
     backend: pair("BACKEND"),
     qaOracle: pair("QA_ORACLE"),
     reviewer: pair("REVIEWER"),
+    reviewer2: pair("REVIEWER2"),
     lab: pair("LAB"),
     workerA: pair("WORKER_A"),
     workerB: pair("WORKER_B"),
@@ -159,7 +169,7 @@ export function labAllowlist(): string[] {
 
 export function reviewerAllowlist(): string[] {
   if (config.reviewerAllow.length) return config.reviewerAllow;
-  return config.roles.reviewer.accountId ? [config.roles.reviewer.accountId] : [];
+  return [config.roles.reviewer.accountId, config.roles.reviewer2.accountId].filter(Boolean);
 }
 
 export const ready = {

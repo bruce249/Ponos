@@ -98,6 +98,9 @@ export type ReviewItem = {
   prompt: string;
   reason: string | null;
   reviewDeadline: number | null;
+  /** ESC-22. Approvals recorded, and how many an early payout needs. */
+  approvals: number;
+  approvalsRequired: number;
   refs: ChainRefs;
 };
 
@@ -391,6 +394,8 @@ function normalizeReviewItem(v: unknown, inherited?: ChainRefs): ReviewItem | nu
     prompt: pickStr(task, ["prompt", "instructions"]) ?? "",
     reason: pickStr(o, ["reason", "holdReason"]) ?? pickStr(task, ["reason"]),
     reviewDeadline: asTimeMs(task.reviewDeadline ?? task.deadline ?? o.reviewDeadline ?? o.deadline),
+    approvals: typeof o.approvals === "number" ? o.approvals : 0,
+    approvalsRequired: o.approvalsRequired === 2 ? 2 : 1,
     refs: chainRefs(task, chainRefs(o, inherited)),
   };
 }

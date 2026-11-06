@@ -38,7 +38,7 @@ await registerWorker(evm, evm, 20);
 const db = openDb(config.dbPath);
 const workerId = randomUUID();
 run(db, "INSERT INTO workers (id, kind, label, display_name, account_id, evm_address, created_at) VALUES (?, 'demo', 'demo human', 'e2e', ?, ?, ?)", workerId, workerAccount, evm, Date.now());
-const worker: WorkerRow = { id: workerId, kind: "demo", label: "demo human", display_name: "e2e", world_iss: null, world_sub: null, world_acr: null, account_id: workerAccount, evm_address: evm, banned_at: null, created_at: Date.now() };
+const worker: WorkerRow = { id: workerId, kind: "demo", label: "demo human", display_name: "e2e", world_iss: null, world_sub: null, world_acr: null, account_id: workerAccount, evm_address: evm, chain_evm: evm, banned_at: null, created_at: Date.now() };
 
 const gold = { q1: "ok" };
 const checklist = ["done"];
@@ -86,6 +86,7 @@ async function balances() {
 }
 
 console.log(`scheduling: ${scheduling}`);
+let keeperPaid = false;
 
 console.log("instant");
 {
@@ -137,12 +138,18 @@ console.log("timeout");
     }
     const state = get<{ state: string }>(db, "SELECT state FROM tasks WHERE task_id = ?", Number(claimed.taskId));
     if (state?.state !== "Released") {
-      console.log("  schedule has not paid yet; keeper tick");
+      // The keeper would still pay, so a green run could hide a schedule that never fires (spike S3, decision D1).
+      const msg = `The ${scheduling} schedule did not release task ${claimed.taskId} by ${new Date(until).toISOString()}.`;
+      if (process.env.E2E_ALLOW_KEEPER_FALLBACK !== "1") {
+        die(`${msg} The keeper would pay it, but D1 needs to know the schedule failed. Set ESCROW_SCHEDULING=keeper (redeploy with the flag off) or E2E_ALLOW_KEEPER_FALLBACK=1 to accept the keeper.`);
+      }
+      console.log(`  WARNING: ${msg} Keeper tick instead (E2E_ALLOW_KEEPER_FALLBACK=1).`);
       await keeperTick(db);
+      keeperPaid = true;
     }
   }
   await expectHcs(Number(claimed.taskId), ["TaskClaimed", "TaskSubmitted", "TaskReleased"]);
   await assertPaid("40", before);
 }
 
-console.log("e2e ok");
+console.log(keeperPaid ? "e2e ok, but the timeout was paid by the keeper, not the schedule" : scheduling === "keeper" ? "e2e ok (keeper path)" : "e2e ok (scheduled release paid)");
