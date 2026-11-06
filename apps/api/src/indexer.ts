@@ -13,7 +13,7 @@ import {
   type TaskEventName,
 } from "@byline-work/shared";
 import { config } from "./config";
-import { accountInfo, knownAccountByEvm, mirrorBase, NotConfigured } from "./chain";
+import { evmAddressFromKey, knownAccountByEvm, mirrorBase, NotConfigured } from "./chain";
 import { all, get, metaGet, metaSet, run, type Db } from "./db";
 import { submitHcs } from "./hcs";
 import { scheduleRelease } from "./schedule";
@@ -122,6 +122,7 @@ const HCS_NAME: Record<string, TaskEventName | undefined> = {
   TaskSubmitted: "submitted",
   QaPassed: "qa_pass",
   QaFailed: "qa_fail",
+  TaskFirstApproval: "first_approval",
   TaskApproved: "approved",
   TaskHeld: "held",
   TaskDisputed: "disputed",
@@ -185,6 +186,20 @@ function project(db: Db, name: string, args: Record<string, unknown>, txId: stri
     return;
   }
   const patch = (sql: string, ...params: unknown[]) => run(db, `UPDATE tasks SET ${sql}, updated_at = ? WHERE task_id = ?`, ...params, now, taskId);
+  if (name === "TaskFirstApproval") {
+    // Covers approvals sent outside this API (HashScan, a script). The review route reads this key.
+    const reviewer = String(args.reviewer ?? "").toLowerCase();
+    const signer = (["reviewer", "reviewerB"] as const).find((r) => {
+      const key = config.roles[r].privateKey;
+      try {
+        return !!key && evmAddressFromKey(key).toLowerCase() === reviewer;
+      } catch {
+        return false;
+      }
+    });
+    if (!metaGet(db, `first_approver:${taskId}`)) metaSet(db, `first_approver:${taskId}`, signer ?? reviewer);
+    return;
+  }
   if (name === "ClaimExpired") {
     const row = get<{ state: string }>(db, "SELECT state FROM tasks WHERE task_id = ?", taskId);
     if (row && row.state !== "Expired") {
@@ -333,7 +348,7 @@ async function maybeReceipt(db: Db, batchId: string) {
 async function retryHcs(db: Db) {
   const rows = all<{ tx_hash: string; log_index: number; name: string; payload: string }>(
     db,
-    "SELECT tx_hash, log_index, name, payload FROM task_events WHERE hcs_sequence IS NULL AND hcs_attempts < 8 AND name IN ('BatchFunded','TaskClaimed','ClaimExpired','TaskSubmitted','QaPassed','QaFailed','TaskApproved','TaskHeld','TaskDisputed','TaskReleased','TaskRefunded','TaskResolved','UnclaimedWithdrawn') LIMIT 20",
+    "SELECT tx_hash, log_index, name, payload FROM task_events WHERE hcs_sequence IS NULL AND hcs_attempts < 8 AND name IN ('BatchFunded','TaskClaimed','ClaimExpired','TaskSubmitted','QaPassed','QaFailed','TaskFirstApproval','TaskApproved','TaskHeld','TaskDisputed','TaskReleased','TaskRefunded','TaskResolved','UnclaimedWithdrawn') LIMIT 20",
   );
   for (const row of rows) {
     const event = HCS_NAME[row.name];

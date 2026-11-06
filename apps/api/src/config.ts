@@ -32,10 +32,9 @@ if (scheduling !== "hip1215" && scheduling !== "sdk" && scheduling !== "keeper")
   throw new Error(`ESCROW_SCHEDULING must be hip1215, sdk, or keeper, got ${scheduling}`);
 }
 
-/** HITL_THRESHOLD is whole bUSD in .env (100). A value that is already base units (>= 1e6) is kept. */
-function hitlBase(): bigint {
-  const raw = env("HITL_THRESHOLD", "100");
-  if (!/^\d+$/.test(raw)) throw new Error(`HITL_THRESHOLD must be an integer, got ${raw}`);
+/** Thresholds are whole bUSD in .env (100). A value that is already base units (>= 1e6) is kept. */
+export function busdThresholdBase(name: string, raw: string): bigint {
+  if (!/^\d+$/.test(raw)) throw new Error(`${name} must be an integer, got ${raw}`);
   const n = BigInt(raw);
   return n >= 1_000_000n ? n : n * 1_000_000n;
 }
@@ -73,7 +72,9 @@ export const config = {
     contractId: env("ESCROW_CONTRACT_ID"),
     address: env("ESCROW_ADDRESS"),
     scheduling: scheduling as "hip1215" | "sdk" | "keeper",
-    hitlBase: hitlBase(),
+    hitlBase: busdThresholdBase("HITL_THRESHOLD", env("HITL_THRESHOLD", "100")),
+    /** Above this, approve needs two distinct reviewers on-chain. 0 turns the tier off. */
+    dualReviewBase: busdThresholdBase("DUAL_REVIEW_THRESHOLD", env("DUAL_REVIEW_THRESHOLD", "1000")),
     feeBps: BigInt(env("PLATFORM_FEE_BPS", "300")),
     qaBps: BigInt(env("QA_POOL_SHARE_BPS", "3333")),
     minWindow: num("MIN_WINDOW_SEC", 120),
@@ -138,6 +139,8 @@ export const config = {
     backend: pair("BACKEND"),
     qaOracle: pair("QA_ORACLE"),
     reviewer: pair("REVIEWER"),
+    /** Optional second reviewer for the dual-review tier. */
+    reviewerB: pair("REVIEWER_B"),
     lab: pair("LAB"),
     workerA: pair("WORKER_A"),
     workerB: pair("WORKER_B"),
@@ -159,7 +162,28 @@ export function labAllowlist(): string[] {
 
 export function reviewerAllowlist(): string[] {
   if (config.reviewerAllow.length) return config.reviewerAllow;
-  return config.roles.reviewer.accountId ? [config.roles.reviewer.accountId] : [];
+  return [config.roles.reviewer.accountId, config.roles.reviewerB.accountId].filter(Boolean);
+}
+
+/** Role accounts a worker may never bind as a payout wallet, redeem from, or have frozen by the desk. */
+export const PLATFORM_ROLES = ["operator", "scsAdmin", "cashin", "burn", "compliance", "treasury", "qaPool", "escrowAdmin", "backend", "qaOracle", "reviewer", "reviewerB", "lab", "agent"] as const;
+/** Demo worker wallets whose keys the server holds (demo custody). */
+export const WORKER_ROLES = ["workerA", "workerB", "workerRented"] as const;
+
+export function isPlatformAccount(accountId: string): boolean {
+  const id = accountId.trim();
+  if (!id) return false;
+  if (id === config.escrow.contractId || id === config.token.id) return true;
+  return PLATFORM_ROLES.some((r) => config.roles[r].accountId === id);
+}
+
+/** Server-held key for a demo worker wallet. Never returns a platform role key. */
+export function workerKeyFor(accountId: string): string | null {
+  for (const r of WORKER_ROLES) {
+    const role = config.roles[r];
+    if (role.accountId && role.accountId === accountId && role.privateKey) return role.privateKey;
+  }
+  return null;
 }
 
 export const ready = {

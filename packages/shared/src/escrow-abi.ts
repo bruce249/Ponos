@@ -1,6 +1,6 @@
 /**
  * EscrowVault ABI, copied from contracts/src/EscrowVault.sol.
- * The Solidity file is owned by the chain track and is not edited here.
+ * Keep in sync with the contract: packages/shared/test/abi.test.ts diffs this against contracts/out.
  * Event indexed flags match the contract so the indexer can decode mirror-node logs.
  */
 import { parseAbi } from "viem";
@@ -30,6 +30,8 @@ export const escrowAbi = parseAbi([
   "error Reentrancy()",
   "error ZeroAddress()",
   "error BadConfig()",
+  "error MissingReason()",
+  "error SameReviewer()",
 
   "event BatchFunded(bytes32 indexed batchId, address indexed client, uint32 taskCount, uint64 payPerTask, uint256 feePerTask, uint256 total, uint32 reviewWindow, uint32 workWindow, uint32 revisionWindow)",
   "event TaskClaimed(uint256 indexed taskId, bytes32 indexed batchId, address indexed worker, address payout, uint64 workDeadline, uint256 pay)",
@@ -38,6 +40,7 @@ export const escrowAbi = parseAbi([
   "event QaPassed(uint256 indexed taskId, bytes32 indexed batchId, bytes32 reportHash, bool awaitingApproval, uint256 pay)",
   "event QaFailed(uint256 indexed taskId, bytes32 indexed batchId, bytes32 reasonHash, uint8 failCount, uint64 actionDeadline)",
   "event TaskApproved(uint256 indexed taskId, bytes32 indexed batchId)",
+  "event TaskFirstApproval(uint256 indexed taskId, bytes32 indexed batchId, address reviewer)",
   "event TaskHeld(uint256 indexed taskId, bytes32 indexed batchId, bytes32 reasonHash, uint64 disputeDeadline)",
   "event TaskDisputed(uint256 indexed taskId, bytes32 indexed batchId, bytes32 reasonHash, uint64 disputeDeadline)",
   "event TaskReleased(uint256 indexed taskId, bytes32 indexed batchId, address payout, uint256 pay, uint256 fee, bytes32 path)",
@@ -87,6 +90,8 @@ export const escrowAbi = parseAbi([
   "function treasury() view returns (address)",
   "function qaPool() view returns (address)",
   "function hitlThreshold() view returns (uint64)",
+  "function dualReviewThreshold() view returns (uint64)",
+  "function firstApprover(uint256 taskId) view returns (address)",
   "function platformFeeBps() view returns (uint16)",
   "function qaPoolShareBps() view returns (uint16)",
   "function minWindow() view returns (uint32)",

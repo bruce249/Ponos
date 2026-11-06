@@ -201,6 +201,7 @@ contract EscrowVaultInvariantTest is Test {
     uint32 constant MIN_W = 60;
     uint32 constant MAX_W = 30 days;
     uint32 constant DISPUTE_W = 600;
+    uint64 constant DUAL = 1_000_000_000; // 1,000 bUSD
 
     MockBUSD busd;
     EscrowVault vault;
@@ -220,7 +221,7 @@ contract EscrowVaultInvariantTest is Test {
         address reviewer = makeAddr("reviewer");
 
         vault = new EscrowVault(
-            address(busd), treasury, qaPool, admin, HITL, FEE_BPS, QA_BPS, MIN_W, MAX_W, DISPUTE_W, false, 0
+            address(busd), treasury, qaPool, admin, HITL, FEE_BPS, QA_BPS, MIN_W, MAX_W, DISPUTE_W, false, 0, DUAL
         );
         vm.startPrank(admin);
         vault.grantRole(vault.VERIFIER(), verifier);

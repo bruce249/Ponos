@@ -26,6 +26,8 @@
     "buy-nav": "tsx --env-file-if-exists=.env scripts/buy-nav.ts",
     "score": "tsx --env-file-if-exists=.env scripts/score.ts",
     "test": "tsx --test packages/shared/test/*.test.ts apps/api/test/*.test.ts",
+    "test:contracts": "cd contracts && forge test",
+    "check": "npm run typecheck && npm test",
     "dev:web": "npm run dev -w @byline/web",
     "typecheck": "tsc -p packages/shared && tsc -p apps/api && tsc -p scripts && npm run typecheck -w @byline/web"
   },

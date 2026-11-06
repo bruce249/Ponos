@@ -13,6 +13,7 @@ import {
   hashscanContract,
   hashscanToken,
   hashscanTx,
+  isAccountId,
   requiresStepUp,
   type BatchCreateRequest,
   type BatchCreateResponse,
@@ -25,7 +26,7 @@ import {
   type WorkSubmission,
 } from "@byline-work/shared";
 import { banGate, claimCapGate, recordClaim, recordDenial } from "./caps";
-import { config, labAllowlist } from "./config";
+import { config, isPlatformAccount, labAllowlist } from "./config";
 import { accountInfo, EscrowCallError, evmAddressFromKey, NotConfigured } from "./chain";
 import { all, get, run, type BatchRow, type Db, type TaskRow, type WorkerRow } from "./db";
 import { claimFor, disputeFor, fundBatch, registerWorker, resubmitFor, setWorkerPayout, submitFor } from "./escrow";
@@ -180,6 +181,11 @@ export async function dispute(db: Db, worker: WorkerRow, taskId: number, reason:
 }
 
 export async function bindPayout(db: Db, worker: WorkerRow, accountId: string, approvalId: string | null) {
+  if (!isAccountId(accountId)) throw Object.assign(new Error("accountId must look like 0.0.1234"), { status: 400 });
+  if (isPlatformAccount(accountId)) throw Object.assign(new Error("That is a platform role account, not a worker wallet."), { status: 400 });
+  // One wallet, one worker: a shared payout wallet is how rented accounts pool earnings.
+  const taken = get<{ id: string }>(db, "SELECT id FROM workers WHERE account_id = ? AND id != ?", accountId, worker.id);
+  if (taken) throw Object.assign(new Error("That payout account is already bound to another worker."), { status: 409 });
   if (worker.kind === "world") {
     if (!approvalId) throw Object.assign(new Error("Changing or setting a payout wallet needs a payout_wallet step-up."), { status: 403 });
     const used = consumeApproval(db, approvalId, worker.id, "payout_wallet", accountId);

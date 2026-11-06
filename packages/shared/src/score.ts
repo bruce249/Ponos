@@ -29,7 +29,8 @@ export function passRate(passes: number, submissions: number, globalPassRate: nu
 
 export function onTimeRate(onTimeSubmits: number, claimed: number): number {
   if (claimed <= 0) return 0;
-  return onTimeSubmits / claimed;
+  // A resubmit after a revision is a second `submitted` event for the same claim. Cap at 1.
+  return Math.min(1, onTimeSubmits / claimed);
 }
 
 export function volumeBusd(items: { valueBusd: number; ageDays: number }[]): number {
@@ -105,11 +106,9 @@ export function scoresFromEvents(events: PublicTaskEvent[], global?: { passes: n
       submissions: list.filter((e) => e.event === "submitted").length,
       claimed: list.filter((e) => e.event === "claimed").length,
       onTimeSubmits: list.filter((e) => e.event === "submitted").length,
-      disputesLost: list.filter((e) => e.disputeLost || (e.event === "resolved" && e.disputeLost)).length,
+      disputesLost: list.filter((e) => e.disputeLost).length,
       volume: volumeBusd(list.filter((e) => (e.event === "released" || e.event === "resolved") && e.valueBusd).map((e) => ({ valueBusd: e.valueBusd!, ageDays: e.ageDays ?? 0 }))),
     };
-    // disputeLost flag is the source of truth; also count resolved events that set it.
-    row.disputesLost = list.filter((e) => e.disputeLost).length;
     out.push({ ...row, score: contributorScore({ ...row, globalPassRate: p0 }) });
   }
   out.sort((a, b) => b.score - a.score);

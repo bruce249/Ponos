@@ -5,7 +5,7 @@ AI labs lock the money for a task before anyone starts. A verified human does th
 
 ETHGlobal Mumbai 2026 · Hedera (Stablecoin Studio, HTS, Scheduled Transactions, HCS, x402) · World ID · 0G
 
-> This extends [BYLINE_V2.md](BYLINE_V2.md). v2 paid writers when AI relied on their writing. Byline Work pays experts (coders, designers, finance, medicine, languages) who produce training data for AI on request, the way Outlier, Mercor and Handshake AI work today, and fixes how they get paid.
+> This extends Byline v2 (`BYLINE_V2.md` in `../ETHGM/Build`). v2 paid writers when AI relied on their writing. Byline Work pays experts (coders, designers, finance, medicine, languages) who produce training data for AI on request, the way Outlier, Mercor and Handshake AI work today, and fixes how they get paid.
 
 ---
 

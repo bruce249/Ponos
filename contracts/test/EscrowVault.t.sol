@@ -13,6 +13,7 @@ contract EscrowVaultTest is Test {
     uint32 constant MIN_W = 60;
     uint32 constant MAX_W = 30 days;
     uint32 constant DISPUTE_W = 600;
+    uint64 constant DUAL = 1_000_000_000; // 1,000 bUSD
 
     MockBUSD busd;
     EscrowVault vault;
@@ -524,11 +525,94 @@ contract EscrowVaultTest is Test {
         _assertConserved(pay);
     }
 
+    // ---------- dual review and reasons ----------
+
+    function test_dual_review_needs_two_distinct_reviewers() public {
+        address reviewerB = makeAddr("reviewerB");
+        bytes32 role = vault.REVIEWER();
+        vm.prank(admin);
+        vault.grantRole(role, reviewerB);
+
+        uint64 pay = 1_500_000_000; // 1,500 bUSD, above DUAL
+        bytes32 id = _fund(vault, pay, 1);
+        uint256 taskId = _claimFor(id, worker);
+        _submit(taskId, worker, keccak256("work"));
+        vm.prank(oracle);
+        vault.qaPass(taskId, keccak256("report"));
+
+        vm.prank(reviewer);
+        vault.approve(taskId);
+        assertEq(_state(taskId), uint256(EscrowVault.TaskState.AwaitingApproval));
+        assertEq(vault.firstApprover(taskId), reviewer);
+        assertEq(busd.balanceOf(payout), 0);
+
+        vm.prank(reviewer);
+        vm.expectRevert(EscrowVault.SameReviewer.selector);
+        vault.approve(taskId);
+
+        vm.prank(reviewerB);
+        vault.approve(taskId);
+        assertEq(_state(taskId), uint256(EscrowVault.TaskState.Released));
+        _assertConserved(pay);
+    }
+
+    function test_dual_review_does_not_block_timeout() public {
+        uint64 pay = 1_500_000_000;
+        bytes32 id = _fund(vault, pay, 1);
+        uint256 taskId = _claimFor(id, worker);
+        _submit(taskId, worker, keccak256("work"));
+        vm.prank(oracle);
+        vault.qaPass(taskId, keccak256("report"));
+        vm.prank(reviewer);
+        vault.approve(taskId);
+        (, , , , uint64 reviewDeadline) = _deadlines(taskId);
+        vm.warp(reviewDeadline);
+        vault.release(taskId);
+        _assertConserved(pay);
+    }
+
+    function test_single_review_at_dual_threshold() public {
+        uint64 pay = DUAL;
+        bytes32 id = _fund(vault, pay, 1);
+        uint256 taskId = _claimFor(id, worker);
+        _submit(taskId, worker, keccak256("work"));
+        vm.prank(oracle);
+        vault.qaPass(taskId, keccak256("report"));
+        vm.prank(reviewer);
+        vault.approve(taskId);
+        assertEq(_state(taskId), uint256(EscrowVault.TaskState.Released));
+    }
+
+    function test_hold_without_reason_reverts() public {
+        bytes32 id = _fund(vault, 40_000_000, 1);
+        uint256 taskId = _claim(id, worker);
+        _submit(taskId, worker, keccak256("work"));
+        vm.prank(reviewer);
+        vm.expectRevert(EscrowVault.MissingReason.selector);
+        vault.hold(taskId, bytes32(0));
+    }
+
+    function test_dispute_without_reason_reverts() public {
+        bytes32 id = _fund(vault, 40_000_000, 1);
+        uint256 taskId = _claim(id, worker);
+        _submit(taskId, worker, keccak256("work"));
+        vm.prank(oracle);
+        vault.qaFail(taskId, keccak256("bad"));
+        vm.prank(worker);
+        vm.expectRevert(EscrowVault.MissingReason.selector);
+        vault.dispute(taskId, bytes32(0));
+    }
+
+    function test_dual_threshold_below_hitl_is_rejected() public {
+        vm.expectRevert(EscrowVault.BadConfig.selector);
+        new EscrowVault(address(busd), treasury, qaPool, admin, HITL, FEE_BPS, QA_BPS, MIN_W, MAX_W, DISPUTE_W, false, 0, HITL - 1);
+    }
+
     // ---------- helpers ----------
 
     function _deploy(bool scheduling) internal returns (EscrowVault v) {
         v = new EscrowVault(
-            address(busd), treasury, qaPool, admin, HITL, FEE_BPS, QA_BPS, MIN_W, MAX_W, DISPUTE_W, scheduling, 0
+            address(busd), treasury, qaPool, admin, HITL, FEE_BPS, QA_BPS, MIN_W, MAX_W, DISPUTE_W, scheduling, 0, DUAL
         );
     }
 

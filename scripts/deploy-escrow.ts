@@ -11,7 +11,7 @@ import { parseHederaKey } from "@byline-work/shared";
 import { config } from "../apps/api/src/config";
 import { evmAddressFromKey } from "../apps/api/src/chain";
 import { grantRole, associateEscrowToken } from "../apps/api/src/escrow";
-import { die, missing, need } from "./lib";
+import { die, missing, need, networkSlug, writeEnv } from "./lib";
 
 const absent = missing([
   "OPERATOR_ACCOUNT_ID",
@@ -48,24 +48,23 @@ const token = evmOf(AccountId.fromString(need("BUSD_TOKEN_ID")));
 const treasury = evmAddressFromKey(need("TREASURY_PRIVATE_KEY"));
 const qaPool = evmAddressFromKey(need("QA_POOL_PRIVATE_KEY"));
 const admin = evmAddressFromKey(need("ESCROW_ADMIN_PRIVATE_KEY"));
-const scheduling = (process.env.ESCROW_SCHEDULING || "hip1215") === "hip1215";
-const hitl = BigInt(process.env.HITL_THRESHOLD || "100");
-const hitlBase = hitl >= 1_000_000n ? hitl : hitl * 1_000_000n;
+const scheduling = config.escrow.scheduling === "hip1215";
 const encoded = encodeAbiParameters(
-  parseAbiParameters("address, address, address, address, uint64, uint16, uint16, uint32, uint32, uint32, bool, uint256"),
+  parseAbiParameters("address, address, address, address, uint64, uint16, uint16, uint32, uint32, uint32, bool, uint256, uint64"),
   [
     token,
     treasury,
     qaPool,
     admin,
-    hitlBase,
-    Number(process.env.PLATFORM_FEE_BPS || "300"),
-    Number(process.env.QA_POOL_SHARE_BPS || "3333"),
-    Number(process.env.MIN_WINDOW_SEC || "120"),
-    Number(process.env.MAX_WINDOW_SEC || "2592000"),
-    Number(process.env.DISPUTE_WINDOW_SEC || "600"),
+    config.escrow.hitlBase,
+    Number(config.escrow.feeBps),
+    Number(config.escrow.qaBps),
+    config.escrow.minWindow,
+    config.escrow.maxWindow,
+    config.escrow.disputeWindow,
     scheduling,
-    BigInt(process.env.HBAR_LOW_TINYBAR || "500000000"),
+    config.escrow.hbarLowTinybar,
+    config.escrow.dualReviewBase,
   ],
 );
 
@@ -80,9 +79,10 @@ const receipt = await created.getReceipt(client);
 const contractId = receipt.contractId?.toString() ?? "";
 if (!contractId) die("Contract create returned no contract id.");
 const address = evmOf(ContractId.fromString(contractId));
+writeEnv({ ESCROW_CONTRACT_ID: contractId, ESCROW_ADDRESS: address });
 console.log(`ESCROW_CONTRACT_ID=${contractId}`);
 console.log(`ESCROW_ADDRESS=${address}`);
-console.log(`# https://hashscan.io/testnet/contract/${contractId}`);
+console.log(`# https://hashscan.io/${networkSlug()}/contract/${contractId}`);
 
 process.env.ESCROW_CONTRACT_ID = contractId;
 process.env.ESCROW_ADDRESS = address;
@@ -98,12 +98,17 @@ const backend = evmAddressFromKey(need("BACKEND_PRIVATE_KEY"));
 const qa = evmAddressFromKey(need("QA_ORACLE_PRIVATE_KEY"));
 const reviewer = evmAddressFromKey(need("REVIEWER_PRIVATE_KEY"));
 const role = (name: string) => keccak256(stringToBytes(name));
-for (const [hash, account] of [
+const grants: [Hex, Hex][] = [
   [role("VERIFIER"), backend],
   [role("RELAYER"), backend],
   [role("QA_ORACLE"), qa],
   [role("REVIEWER"), reviewer],
-] as const) {
+];
+// Optional second reviewer for the dual-review tier.
+const reviewerBKey = (process.env.REVIEWER_B_PRIVATE_KEY ?? "").trim();
+if (reviewerBKey) grants.push([role("REVIEWER"), evmAddressFromKey(reviewerBKey)]);
+else if (config.escrow.dualReviewBase > 0n) console.warn("# REVIEWER_B_PRIVATE_KEY is not set: tasks above DUAL_REVIEW_THRESHOLD can only be released by timeout.");
+for (const [hash, account] of grants) {
   const granted = await grantRole(hash, account);
   console.log(`# grant ${account} tx ${granted.txId}`);
 }

@@ -5,7 +5,8 @@
  *
  *   npm run busd
  */
-import { decimalToBase } from "@byline-work/shared";
+import { AccountId } from "@hiero-ledger/sdk";
+import { writeEnv } from "../scripts/lib";
 import { addTinyHbarFee, createCoin, missing } from "./client";
 
 const required = [
@@ -42,9 +43,11 @@ try {
   console.error("The fee is 1 tinybar of HBAR, collected by the treasury, so it cannot skim bUSD out of the escrow.");
 }
 
+const tokenEvm = `0x${AccountId.fromString(tokenId).toEvmAddress().replace(/^0x/, "")}`;
+writeEnv({ BUSD_TOKEN_ID: tokenId, BUSD_TOKEN_EVM: tokenEvm, ...(proxy ? { BUSD_SCS_PROXY: proxy } : {}), ...(reserve ? { BUSD_RESERVE_ADDRESS: reserve } : {}) });
 console.log(`BUSD_TOKEN_ID=${tokenId}`);
+console.log(`BUSD_TOKEN_EVM=${tokenEvm}`);
 if (proxy) console.log(`BUSD_SCS_PROXY=${proxy}`);
 if (reserve) console.log(`BUSD_RESERVE_ADDRESS=${reserve}`);
-console.log(`# reserve initial amount base units: ${decimalToBase("0")}`);
 if (feeTx) console.log(`# custom fee tx (1 tinybar HBAR, treasury exempt): ${feeTx}`);
 console.log(`# https://hashscan.io/testnet/token/${tokenId}`);

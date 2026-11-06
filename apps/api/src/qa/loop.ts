@@ -13,7 +13,22 @@ import { zgChat } from "./zg";
 
 type Pending = { task_id: number; body: string; qa_mode: string; gold_json: string; checklist_json: string };
 
+/** The submit route grades inline and the 10 s loop retries. This stops both grading one task at once. */
+const inFlight = new Set<number>();
+/** After this many failed chain calls the task is left to the deadline (silence pays the worker). */
+export const MAX_QA_ATTEMPTS = 5;
+
 export async function gradeTask(db: Db, taskId: number): Promise<{ pass: boolean; reportHash: Hex; txId: string | null } | null> {
+  if (inFlight.has(taskId)) return null;
+  inFlight.add(taskId);
+  try {
+    return await gradeOnce(db, taskId);
+  } finally {
+    inFlight.delete(taskId);
+  }
+}
+
+async function gradeOnce(db: Db, taskId: number): Promise<{ pass: boolean; reportHash: Hex; txId: string | null } | null> {
   const row = get<Pending>(
     db,
     `SELECT t.task_id, w.body, b.qa_mode, i.gold_json, i.checklist_json
@@ -93,7 +108,9 @@ export async function qaTick(db: Db): Promise<number> {
      JOIN batches b ON b.id = t.batch_id
      WHERE t.state = 'Submitted' AND b.qa_mode = 'auto'
        AND NOT EXISTS (SELECT 1 FROM reports r WHERE r.task_id = t.task_id AND r.chain_tx IS NOT NULL)
+       AND (SELECT COUNT(*) FROM reports r WHERE r.task_id = t.task_id AND r.chain_tx IS NULL) < ?
      LIMIT 10`,
+    MAX_QA_ATTEMPTS,
   );
   let n = 0;
   for (const row of rows) {

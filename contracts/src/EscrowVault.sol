@@ -8,6 +8,7 @@ import {HederaResponseCodes, IHederaScheduleService} from "./hedera/IHederaSched
 ///         Silence pays the worker. A reviewer can stop a large payment only with an on-chain hold.
 /// @dev Not upgradeable. The admin can pause new funding and claims, and cannot move locked funds.
 ///      HIP-1215 scheduling is a constructor flag. `release` stays permissionless either way.
+///      Above `dualReviewThreshold` (0 = off) an approval needs two distinct reviewers.
 contract EscrowVault {
     enum TaskState {
         None,
@@ -77,6 +78,7 @@ contract EscrowVault {
     address public immutable treasury;
     address public immutable qaPool;
     uint64 public immutable hitlThreshold;
+    uint64 public immutable dualReviewThreshold;
     uint16 public immutable platformFeeBps;
     uint16 public immutable qaPoolShareBps;
     uint32 public immutable minWindow;
@@ -94,6 +96,8 @@ contract EscrowVault {
     mapping(uint256 => Task) public tasks;
     mapping(address => WorkerInfo) public workers;
     mapping(address => mapping(bytes32 => bool)) public roles;
+    /// First reviewer to approve a task above `dualReviewThreshold`. A second, different reviewer pays it.
+    mapping(uint256 => address) public firstApprover;
 
     uint256 private _locked;
 
@@ -121,6 +125,8 @@ contract EscrowVault {
     error Reentrancy();
     error ZeroAddress();
     error BadConfig();
+    error MissingReason();
+    error SameReviewer();
 
     event BatchFunded(
         bytes32 indexed batchId,
@@ -148,6 +154,7 @@ contract EscrowVault {
     event QaPassed(uint256 indexed taskId, bytes32 indexed batchId, bytes32 reportHash, bool awaitingApproval, uint256 pay);
     event QaFailed(uint256 indexed taskId, bytes32 indexed batchId, bytes32 reasonHash, uint8 failCount, uint64 actionDeadline);
     event TaskApproved(uint256 indexed taskId, bytes32 indexed batchId);
+    event TaskFirstApproval(uint256 indexed taskId, bytes32 indexed batchId, address reviewer);
     event TaskHeld(uint256 indexed taskId, bytes32 indexed batchId, bytes32 reasonHash, uint64 disputeDeadline);
     event TaskDisputed(uint256 indexed taskId, bytes32 indexed batchId, bytes32 reasonHash, uint64 disputeDeadline);
     event TaskReleased(uint256 indexed taskId, bytes32 indexed batchId, address payout, uint256 pay, uint256 fee, bytes32 path);
@@ -200,11 +207,13 @@ contract EscrowVault {
         uint32 maxWindow_,
         uint32 disputeWindow_,
         bool schedulingEnabled_,
-        uint256 hbarLowWatermark_
+        uint256 hbarLowWatermark_,
+        uint64 dualReviewThreshold_
     ) {
         if (token_ == address(0) || treasury_ == address(0) || qaPool_ == address(0) || admin_ == address(0)) revert ZeroAddress();
         if (platformFeeBps_ > BPS || qaPoolShareBps_ > BPS) revert BadConfig();
         if (minWindow_ == 0 || minWindow_ > maxWindow_ || disputeWindow_ == 0) revert BadConfig();
+        if (dualReviewThreshold_ != 0 && dualReviewThreshold_ < hitlThreshold_) revert BadConfig();
         token = token_;
         treasury = treasury_;
         qaPool = qaPool_;
@@ -217,6 +226,7 @@ contract EscrowVault {
         disputeWindow = disputeWindow_;
         schedulingEnabled = schedulingEnabled_;
         hbarLowWatermark = hbarLowWatermark_;
+        dualReviewThreshold = dualReviewThreshold_;
     }
 
     receive() external payable {}
@@ -401,14 +411,26 @@ contract EscrowVault {
         emit QaFailed(taskId, t.batchId, reasonHash, t.failCount, t.actionDeadline);
     }
 
+    /// Above `dualReviewThreshold` the first call only records the reviewer; a second, different
+    /// reviewer pays. Either way silence still pays at the deadline, so this never blocks payment.
     function approve(uint256 taskId) external onlyRole(REVIEWER) nonReentrant {
         Task storage t = tasks[taskId];
         if (t.state != TaskState.AwaitingApproval) revert BadState();
+        if (dualReviewThreshold != 0 && batches[t.batchId].payPerTask > dualReviewThreshold) {
+            address first = firstApprover[taskId];
+            if (first == address(0)) {
+                firstApprover[taskId] = msg.sender;
+                emit TaskFirstApproval(taskId, t.batchId, msg.sender);
+                return;
+            }
+            if (first == msg.sender) revert SameReviewer();
+        }
         emit TaskApproved(taskId, t.batchId);
         _payWorker(taskId, PATH_APPROVED);
     }
 
     function hold(uint256 taskId, bytes32 reasonHash) external nonReentrant {
+        if (reasonHash == bytes32(0)) revert MissingReason();
         Task storage t = tasks[taskId];
         if (t.state != TaskState.Submitted && t.state != TaskState.AwaitingApproval) revert BadState();
         if (block.timestamp >= t.reviewDeadline) revert NotDue();
@@ -573,6 +595,7 @@ contract EscrowVault {
     }
 
     function _dispute(uint256 taskId, bytes32 reasonHash, bool direct) internal {
+        if (reasonHash == bytes32(0)) revert MissingReason();
         Task storage t = tasks[taskId];
         if (direct && msg.sender != t.worker) revert NotWorker();
         if (t.state != TaskState.Revising && t.state != TaskState.Failed) revert BadState();

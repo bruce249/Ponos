@@ -113,7 +113,15 @@ function ReviewCard({ item, onDone }: { item: ReviewItem; onDone: (note: FlashNo
       const path = `/api/review/${encodeURIComponent(item.taskId)}/${kind}`;
       const body = kind === "approve" ? {} : kind === "hold" ? { reason: reason.trim() } : { workerBps: bpsNum };
       const res = await api(path, { method: "POST", body: JSON.stringify(body) });
-      const title = kind === "approve" ? "Approved. The pay is released." : kind === "hold" ? "Held. The task is disputed." : `Resolved at ${bpsNum} basis points to the worker.`;
+      const released = !(res && typeof res === "object" && (res as { released?: unknown }).released === false);
+      const title =
+        kind === "approve"
+          ? released
+            ? "Approved. The pay is released."
+            : "First of two approvals recorded. A second reviewer releases the pay."
+          : kind === "hold"
+            ? "Held. The task is disputed."
+            : `Resolved at ${bpsNum} basis points to the worker.`;
       onDone({ kind: "good", title, refs: chainRefs(res, item.refs) });
     } catch (e) {
       onDone({ kind: "bad", title: "Review action failed", text: errorMessage(e) });

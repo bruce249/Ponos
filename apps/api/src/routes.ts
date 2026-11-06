@@ -13,6 +13,7 @@ import {
   hashscanTopic,
   hashscanTopicMessage,
   hashscanTx,
+  isAccountId,
   scoresFromEvents,
   type BatchCreateRequest,
   type ConfigResponse,
@@ -21,14 +22,13 @@ import {
   type WorkSubmission,
 } from "@byline-work/shared";
 import { banWorker } from "./caps";
-import { config, labAllowlist, ready, reviewerAllowlist } from "./config";
-import { evmAddressFromKey, tokenBalance } from "./chain";
-import { all, get, run, type BatchRow, type Db, type TaskRow, type WorkerRow } from "./db";
+import { config, isPlatformAccount, labAllowlist, ready, reviewerAllowlist, workerKeyFor } from "./config";
+import { tokenBalance } from "./chain";
+import { all, get, metaGet, metaSet, run, type BatchRow, type Db, type TaskRow, type WorkerRow } from "./db";
 import { approveTask, holdTask, resolveTask, setWorkerStatus } from "./escrow";
-import { submitHcs } from "./hcs";
-import { readTopic } from "./hcs";
+import { readTopic, submitHcs } from "./hcs";
 import { fetchPublicFx, isFxPair } from "./oracle/fx";
-import { navView, reserveView, signFeedBody, statsView } from "./oracle/x402";
+import { clientStatsView, navView, reserveView, signFeedBody, statsView } from "./oracle/x402";
 import { MockOffRamp } from "./offramp/mock";
 import { taskMessage } from "@byline-work/shared";
 import { bindPayout, claim, createBatch, dispute, feed, httpError, links, queue, submit, taskView } from "./work";
@@ -70,6 +70,18 @@ function publicWorker(w: WorkerRow) {
 function fail(c: Context, e: unknown) {
   const http = httpError(e);
   return c.json(http.body, http.status as 400);
+}
+
+/** Positive integer task id from the path, or a 400. */
+function taskParam(c: Context): number | Response {
+  const raw = c.req.param("id") ?? "";
+  const id = Number(raw);
+  if (!/^\d+$/.test(raw) || !Number.isSafeInteger(id) || id <= 0) return c.json({ error: "task id must be a positive integer" }, 400);
+  return id;
+}
+
+async function jsonBody<T>(c: Context): Promise<T | null> {
+  return (await c.req.json().catch(() => null)) as T | null;
 }
 
 function allow(header: string | undefined, list: string[]): boolean {
@@ -240,7 +252,8 @@ function publicScores(db: Db) {
   const mapped = all<{ name: string; payload: string; created_at: number }>(db, "SELECT name, payload, created_at FROM task_events").flatMap((r) => {
     const payload = JSON.parse(r.payload) as { worker?: string; payout?: string; pay?: string; workerAmount?: string; workerBps?: string; taskId?: string };
     const task = payload.taskId ? get<{ worker_evm: string | null }>(db, "SELECT worker_evm FROM tasks WHERE task_id = ?", Number(payload.taskId)) : undefined;
-    const who = payload.worker || payload.payout || task?.worker_evm;
+    // Attribute to the worker identity, not the payout wallet, so a wallet change does not split a score.
+    const who = payload.worker || task?.worker_evm || payload.payout;
     if (!who) return [];
     const event = r.name === "TaskClaimed" ? "claimed" : r.name === "TaskSubmitted" ? "submitted" : r.name === "QaPassed" ? "qa_pass" : r.name === "TaskReleased" ? "released" : r.name === "TaskResolved" ? "resolved" : "";
     if (!event) return [];
@@ -319,12 +332,16 @@ export function mount(app: Hono, db: Db) {
 
   app.post("/api/demo/worker", async (c) => {
     if (!config.demoMockWorld) return c.json({ error: "DEMO_MOCK_WORLD is off. This route does not create a World ID." }, 404);
-    const body = await c.req.json().catch(() => ({} as { displayName?: string; accountId?: string }));
+    const body = (await jsonBody<{ displayName?: unknown; accountId?: unknown }>(c)) ?? {};
+    const accountId = typeof body.accountId === "string" && body.accountId.trim() ? body.accountId.trim() : null;
+    if (accountId && !isAccountId(accountId)) return c.json({ error: "accountId must look like 0.0.1234" }, 400);
+    if (accountId && isPlatformAccount(accountId)) return c.json({ error: "That is a platform role account, not a worker wallet." }, 400);
+    const displayName = typeof body.displayName === "string" && body.displayName.trim() ? body.displayName.trim().slice(0, 60) : "Demo human";
     const id = randomUUID();
     run(
       db,
       "INSERT INTO workers (id, kind, label, display_name, account_id, created_at) VALUES (?, 'demo', 'demo human', ?, ?, ?)",
-      id, body.displayName ?? "Demo human", body.accountId ?? null, Date.now(),
+      id, displayName, accountId, Date.now(),
     );
     run(db, "UPDATE sessions SET worker_id = ? WHERE id = ?", id, session(c, db));
     const w = get<WorkerRow>(db, "SELECT * FROM workers WHERE id = ?", id)!;
@@ -380,6 +397,8 @@ export function mount(app: Hono, db: Db) {
   });
 
   app.post("/api/world/logout", (c) => {
+    const sid = getCookie(c, COOKIE);
+    if (sid) run(db, "UPDATE sessions SET worker_id = NULL WHERE id = ?", sid);
     deleteCookie(c, COOKIE, { path: "/" });
     return c.json({ ok: true });
   });
@@ -535,9 +554,11 @@ export function mount(app: Hono, db: Db) {
   app.post("/api/tasks/:id/submit", async (c) => {
     const w = worker(db, session(c, db));
     if (!w) return c.json({ error: "Sign in first." }, 401);
-    const body = (await c.req.json()) as WorkSubmission;
+    const id = taskParam(c);
+    if (id instanceof Response) return id;
+    const body = await jsonBody<WorkSubmission>(c);
     try {
-      return c.json(await submit(db, w, Number(c.req.param("id")), body, false));
+      return c.json(await submit(db, w, id, asSubmission(body), false));
     } catch (e) {
       return fail(c, e);
     }
@@ -546,9 +567,11 @@ export function mount(app: Hono, db: Db) {
   app.post("/api/tasks/:id/resubmit", async (c) => {
     const w = worker(db, session(c, db));
     if (!w) return c.json({ error: "Sign in first." }, 401);
-    const body = (await c.req.json()) as WorkSubmission;
+    const id = taskParam(c);
+    if (id instanceof Response) return id;
+    const body = await jsonBody<WorkSubmission>(c);
     try {
-      return c.json(await submit(db, w, Number(c.req.param("id")), body, true));
+      return c.json(await submit(db, w, id, asSubmission(body), true));
     } catch (e) {
       return fail(c, e);
     }
@@ -577,9 +600,36 @@ export function mount(app: Hono, db: Db) {
   app.post("/api/review/:id/approve", async (c) => {
     const desk = reviewDesk(c);
     if ("error" in desk) return desk.error;
+    const taskId = taskParam(c);
+    if (taskId instanceof Response) return taskId;
+    // Dual review: above DUAL_REVIEW_THRESHOLD the contract needs two different reviewers.
+    const row = get<{ pay_base: string | null }>(db, "SELECT pay_base FROM tasks WHERE task_id = ?", taskId);
+    const dual = config.escrow.dualReviewBase > 0n && !!row?.pay_base && BigInt(row.pay_base) > config.escrow.dualReviewBase;
+    const firstKey = `first_approver:${taskId}`;
+    const first = dual ? metaGet(db, firstKey) : undefined;
+    let signer: "reviewer" | "reviewerB" = config.roles.reviewerB.accountId && desk.accountId === config.roles.reviewerB.accountId ? "reviewerB" : "reviewer";
+    if (first === signer && !c.req.header("x-byline-account")) {
+      const other = signer === "reviewer" ? "reviewerB" : "reviewer";
+      if (config.roles[other].accountId && config.roles[other].privateKey) signer = other;
+    }
+    if (first === signer) {
+      return c.json({
+        error: "This reviewer already approved. A second, different reviewer must approve. If nobody does, the deadline still pays.",
+        missing: config.roles.reviewerB.privateKey ? undefined : ["REVIEWER_B_ACCOUNT_ID", "REVIEWER_B_PRIVATE_KEY"],
+      }, 409);
+    }
     try {
-      const sent = await approveTask(BigInt(c.req.param("id")));
-      return c.json({ txId: sent.txId, hashscan: links({ tx: hashscanTx(sent.txId, config.hedera.network) }) });
+      const sent = await approveTask(BigInt(taskId), signer);
+      const released = !dual || !!first;
+      if (dual && !first) metaSet(db, firstKey, signer);
+      return c.json({
+        txId: sent.txId,
+        released,
+        signer: config.roles[signer].accountId,
+        note: released ? undefined : "First of two approvals recorded on-chain. A second, different reviewer releases the pay.",
+        custody: "demo",
+        hashscan: links({ tx: hashscanTx(sent.txId, config.hedera.network) }),
+      });
     } catch (e) {
       return fail(c, e);
     }
@@ -588,12 +638,15 @@ export function mount(app: Hono, db: Db) {
   app.post("/api/review/:id/hold", async (c) => {
     const desk = reviewDesk(c);
     if ("error" in desk) return desk.error;
-    const body = await c.req.json().catch(() => ({} as { reason?: string }));
-    if (!body.reason) return c.json({ error: "reason text is required" }, 400);
-    const reasonHash = keccak256(stringToBytes(body.reason));
-    run(db, "UPDATE tasks SET reason_text = ? WHERE task_id = ?", body.reason, Number(c.req.param("id")));
+    const taskId = taskParam(c);
+    if (taskId instanceof Response) return taskId;
+    const body = (await jsonBody<{ reason?: unknown }>(c)) ?? {};
+    const reason = typeof body.reason === "string" ? body.reason.trim() : "";
+    if (!reason) return c.json({ error: "reason text is required" }, 400);
+    const reasonHash = keccak256(stringToBytes(reason));
     try {
-      const sent = await holdTask(BigInt(c.req.param("id")), reasonHash);
+      const sent = await holdTask(BigInt(taskId), reasonHash);
+      run(db, "UPDATE tasks SET reason_text = ? WHERE task_id = ?", reason, taskId);
       return c.json({ txId: sent.txId, reasonHash, hashscan: links({ tx: hashscanTx(sent.txId, config.hedera.network) }) });
     } catch (e) {
       return fail(c, e);
@@ -603,10 +656,13 @@ export function mount(app: Hono, db: Db) {
   app.post("/api/review/:id/resolve", async (c) => {
     const desk = reviewDesk(c);
     if ("error" in desk) return desk.error;
-    const body = await c.req.json().catch(() => ({} as { workerBps?: number }));
-    if (typeof body.workerBps !== "number" || body.workerBps < 0 || body.workerBps > 10_000) return c.json({ error: "workerBps must be 0..10000" }, 400);
+    const taskId = taskParam(c);
+    if (taskId instanceof Response) return taskId;
+    const body = (await jsonBody<{ workerBps?: unknown }>(c)) ?? {};
+    const bps = body.workerBps;
+    if (typeof bps !== "number" || !Number.isInteger(bps) || bps < 0 || bps > 10_000) return c.json({ error: "workerBps must be an integer 0..10000" }, 400);
     try {
-      const sent = await resolveTask(BigInt(c.req.param("id")), body.workerBps);
+      const sent = await resolveTask(BigInt(taskId), bps);
       return c.json({ txId: sent.txId, hashscan: links({ tx: hashscanTx(sent.txId, config.hedera.network) }) });
     } catch (e) {
       return fail(c, e);
@@ -616,16 +672,21 @@ export function mount(app: Hono, db: Db) {
   app.post("/api/fraud", async (c) => {
     const missing = ["BUSD_TOKEN_ID", "COMPLIANCE_ACCOUNT_ID", "COMPLIANCE_PRIVATE_KEY", "BACKEND_ACCOUNT_ID", "BACKEND_PRIVATE_KEY", "ESCROW_CONTRACT_ID", "HCS_TOPIC_ID", "OPERATOR_ACCOUNT_ID", "OPERATOR_PRIVATE_KEY"].filter((k) => !(process.env[k] ?? "").trim());
     if (missing.length) return c.json({ error: "Fraud action is not configured", missing }, 503);
-    const body = await c.req.json().catch(() => ({} as { workerId?: string; accountId?: string }));
-    if (!body.workerId || !body.accountId) return c.json({ error: "workerId and accountId are required" }, 400);
+    const desk = reviewDesk(c);
+    if ("error" in desk) return desk.error;
+    const body = (await jsonBody<{ workerId?: string; accountId?: string }>(c)) ?? {};
+    if (!body.workerId) return c.json({ error: "workerId is required" }, 400);
     const w = get<WorkerRow>(db, "SELECT * FROM workers WHERE id = ?", body.workerId);
-    if (!w?.evm_address) return c.json({ error: "unknown worker" }, 404);
+    if (!w?.evm_address || !w.account_id) return c.json({ error: "unknown worker, or no payout account bound" }, 404);
+    if (body.accountId && body.accountId !== w.account_id) return c.json({ error: "accountId does not match this worker's payout account" }, 400);
+    if (isPlatformAccount(w.account_id)) return c.json({ error: "Platform accounts and the escrow are never frozen." }, 400);
+    const accountId = w.account_id;
     try {
       const { freeze } = await import("../../../stablecoin/lifecycle");
-      const freezeTx = await freeze(body.accountId);
+      const freezeTx = await freeze(accountId);
       const status = await setWorkerStatus(w.evm_address as `0x${string}`, false);
       banWorker(db, w.id);
-      const hcs = await submitHcs(taskMessage({ event: "fraud", worker: body.accountId, token: config.token.id, tx: freezeTx, ts: nowSec() }));
+      const hcs = await submitHcs(taskMessage({ event: "fraud", worker: accountId, token: config.token.id, tx: freezeTx, ts: nowSec() }));
       return c.json({
         freezeTx,
         statusTx: status.txId,
@@ -644,8 +705,12 @@ export function mount(app: Hono, db: Db) {
   app.post("/api/compliance/freeze", async (c) => {
     const missing = ["BUSD_TOKEN_ID", "COMPLIANCE_ACCOUNT_ID", "COMPLIANCE_PRIVATE_KEY"].filter((k) => !(process.env[k] ?? "").trim());
     if (missing.length) return c.json({ error: "Freeze is not configured", missing, custody: "demo" }, 503);
-    const body = await c.req.json().catch(() => ({} as { accountId?: string }));
-    if (!body.accountId) return c.json({ error: "accountId is required" }, 400);
+    const desk = reviewDesk(c);
+    if ("error" in desk) return desk.error;
+    const body = (await jsonBody<{ accountId?: string }>(c)) ?? {};
+    if (!body.accountId || !isAccountId(body.accountId)) return c.json({ error: "accountId like 0.0.1234 is required" }, 400);
+    // Spec: freeze individual wallets only. Never the escrow, treasury, or any platform role.
+    if (isPlatformAccount(body.accountId)) return c.json({ error: "Platform accounts and the escrow are never frozen." }, 400);
     try {
       const { freeze } = await import("../../../stablecoin/lifecycle");
       const freezeTx = await freeze(body.accountId);
@@ -684,18 +749,26 @@ export function mount(app: Hono, db: Db) {
   app.post("/api/redeem", async (c) => {
     const w = worker(db, session(c, db));
     if (!w?.account_id) return c.json({ error: "Bind a payout account first." }, 400);
-    const body = (await c.req.json().catch(() => ({}))) as Partial<RedeemRequest>;
+    const body = (await jsonBody<Partial<RedeemRequest>>(c)) ?? {};
     const corridor = body.corridor ?? "USD-INR";
     if (!body.amount) return c.json({ error: "amount is required" }, 400);
+    let amountBase: bigint;
+    try {
+      amountBase = decimalToBase(body.amount);
+    } catch {
+      return c.json({ error: "amount must be a bUSD decimal with at most 6 places" }, 400);
+    }
+    if (amountBase <= 0n) return c.json({ error: "amount must be greater than 0" }, 400);
     const dest = body.dest ?? { name: "Simulated payout", account: "simulated" };
-    const key = keyFor(w.account_id);
-    if (!key) return c.json({ error: "No server-held key for this payout account (demo custody).", missing: ["WORKER_A_PRIVATE_KEY"] }, 503);
+    // Only demo worker wallets (WORKER_A / WORKER_B / WORKER_RENTED). A platform role key is never used here.
+    const key = workerKeyFor(w.account_id);
+    if (!key) return c.json({ error: "No server-held key for this payout account. Demo custody covers WORKER_A, WORKER_B and WORKER_RENTED only." }, 403);
     try {
       const ramp = new MockOffRamp(async (pair) => {
         const quote = await fetchPublicFx(pair);
         return { rate: quote.rate, source: quote.source };
       });
-      const quote = await ramp.quote(decimalToBase(body.amount), corridor);
+      const quote = await ramp.quote(amountBase, corridor);
       const { redeem } = await import("../../../stablecoin/lifecycle");
       const burned = await redeem(w.account_id, key, body.amount);
       const paid = await ramp.payout(quote.id, burned.burnTx, dest);
@@ -812,11 +885,10 @@ export function mount(app: Hono, db: Db) {
     if (!ready.x402()) return c.json({ error: "x402 stats feed is not configured", missing: ["FEED_SIGNER_KEY"] }, 503);
     return c.json(await signFeedBody("stats", statsView(db)));
   });
-}
-
-function keyFor(accountId: string): string | null {
-  for (const role of Object.values(config.roles)) {
-    if (role.accountId === accountId && role.privateKey) return role.privateKey;
-  }
-  return null;
+  app.get("/x402/client/:id/stats", async (c) => {
+    if (!ready.x402()) return c.json({ error: "x402 client stats feed is not configured", missing: ["FEED_SIGNER_KEY"] }, 503);
+    const id = c.req.param("id");
+    if (!isAccountId(id) && !/^0x[0-9a-fA-F]{40}$/.test(id)) return c.json({ error: "client must be a Hedera account id or EVM address" }, 400);
+    return c.json(await signFeedBody("client", clientStatsView(db, id)));
+  });
 }

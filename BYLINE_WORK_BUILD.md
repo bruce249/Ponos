@@ -2,7 +2,7 @@
 
 Companion to [BYLINE_WORK.md](BYLINE_WORK.md). The spec says what we are building. This file says in what order, what "done" means at each step, and which gaps in the spec we close before writing code.
 
-Status: planning, 2026-11-06. Nothing is built in this folder yet.
+Status: implemented. This file was the plan written before code (2026-11-06) and is kept as the design record. ESC-22 (dual review) and X4-06 (`/x402/client/:id/stats`) from the stretch list are now built. See the README for what is verified and how.
 
 ---
 

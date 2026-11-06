@@ -4,7 +4,7 @@
  *   npm run topic
  */
 import { TopicCreateTransaction } from "@hiero-ledger/sdk";
-import { operatorClient } from "./lib";
+import { networkSlug, operatorClient, writeEnv } from "./lib";
 
 const client = operatorClient();
 const tx = await new TopicCreateTransaction()
@@ -12,8 +12,9 @@ const tx = await new TopicCreateTransaction()
   .setSubmitKey(client.operatorPublicKey!)
   .execute(client);
 const receipt = await tx.getReceipt(client);
-const id = receipt.topicId!.toString();
+const id = receipt.topicId?.toString();
+if (!id) throw new Error("topic create returned no topic id");
+writeEnv({ HCS_TOPIC_ID: id });
 console.log(`HCS_TOPIC_ID=${id}`);
-console.log(`# https://hashscan.io/testnet/topic/${id}`);
-console.log(`# mirror: https://testnet.mirrornode.hedera.com/api/v1/topics/${id}/messages`);
+console.log(`# https://hashscan.io/${networkSlug()}/topic/${id}`);
 client.close();

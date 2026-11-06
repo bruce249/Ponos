@@ -66,3 +66,15 @@ test("scoresFromEvents reads only public events and ignores a missing worker sub
   assert.ok(rows[0]!.score > rows[1]!.score);
   assert.equal(rows[1]?.disputesLost, 1);
 });
+
+test("a resubmit after a revision cannot push on-time above 100% or the score above 100", () => {
+  assert.equal(onTimeRate(2, 1), 1);
+  const rows = scoresFromEvents([
+    { worker: "0xw", event: "claimed" },
+    { worker: "0xw", event: "submitted" },
+    { worker: "0xw", event: "submitted" },
+    { worker: "0xw", event: "qa_pass" },
+    { worker: "0xw", event: "released", valueBusd: 1_000_000, ageDays: 0 },
+  ]);
+  assert.ok(rows[0]!.score <= 100, `score ${rows[0]!.score}`);
+});

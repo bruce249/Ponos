@@ -66,6 +66,7 @@ const ROLE_PREFIX: Record<RoleName, string> = {
   backend: "BACKEND",
   qaOracle: "QA_ORACLE",
   reviewer: "REVIEWER",
+  reviewerB: "REVIEWER_B",
   lab: "LAB",
   workerA: "WORKER_A",
   workerB: "WORKER_B",

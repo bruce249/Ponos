@@ -160,8 +160,8 @@ export async function qaFail(taskId: bigint, reasonHash: Hex) {
   return executeContract({ ...qa, contractId: escrowId(), abi: escrowAbi, functionName: "qaFail", args: [taskId, reasonHash], gas: 400_000 });
 }
 
-export async function approveTask(taskId: bigint) {
-  const reviewer = requireRole("reviewer");
+export async function approveTask(taskId: bigint, signer: "reviewer" | "reviewerB" = "reviewer") {
+  const reviewer = requireRole(signer);
   return executeContract({ ...reviewer, contractId: escrowId(), abi: escrowAbi, functionName: "approve", args: [taskId], gas: 800_000 });
 }
 

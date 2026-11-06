@@ -1,0 +1,46 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    name: Solidity (forge build + test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: contracts
+    steps:
+      - uses: actions/checkout@v4
+      - uses: foundry-rs/foundry-toolchain@v1
+      - run: forge --version
+      - run: forge build --sizes
+      - run: forge test -vv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: escrow-abi
+          path: contracts/out/EscrowVault.sol/EscrowVault.json
+
+  typescript:
+    name: TypeScript (typecheck + tests + ABI drift)
+    runs-on: ubuntu-latest
+    needs: contracts
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/download-artifact@v4
+        with:
+          name: escrow-abi
+          path: contracts/out/EscrowVault.sol
+      - run: npm ci
+      - run: npm run typecheck
+      # Includes the ABI drift test against the artifact the contracts job just compiled.
+      - run: npm test
+      - run: npm run build -w @byline/web
