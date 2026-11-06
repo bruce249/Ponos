@@ -27,7 +27,8 @@ export function startLoops(db: Db) {
   let fx: ReturnType<typeof setInterval> | undefined;
   if (ready.agent() && ready.x402()) {
     const buy = () => buyFx(db).catch((e) => console.error("[fx]", e instanceof Error ? e.message : e));
-    fx = setInterval(buy, 60_000);
+    // Each purchase anchors a feed message on HCS. Every minute buried the task log under feed anchors.
+    fx = setInterval(buy, Math.max(60, Number(process.env.FX_BUY_SEC || 600)) * 1000);
     setTimeout(buy, 2_000);
   } else {
     console.log("[fx] agent buyer idle (AGENT_ACCOUNT_ID / AGENT_PRIVATE_KEY or the x402 feed is not configured)");

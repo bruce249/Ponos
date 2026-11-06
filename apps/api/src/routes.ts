@@ -26,7 +26,9 @@ import { evmAddressFromKey, tokenBalance } from "./chain";
 import { all, chainEvm, get, run, type BatchRow, type Db, type TaskRow, type WorkerRow } from "./db";
 import { approveTask, holdTask, resolveTask, setWorkerStatus } from "./escrow";
 import { submitHcs } from "./hcs";
-import { readTopic } from "./hcs";
+import { readTopic, type TopicEntry } from "./hcs";
+
+let taskLogCache: { at: number; entries: TopicEntry[]; latest: number | null } | null = null;
 import { fetchPublicFx, isFxPair } from "./oracle/fx";
 import { clientStats, navView, reserveView, signFeedBody, statsView } from "./oracle/x402";
 import { MockOffRamp } from "./offramp/mock";
@@ -756,9 +758,20 @@ export function mount(app: Hono, db: Db) {
       }
     }
     let log: unknown[] = [];
+    let hcsLatest: number | null = null;
     if (config.hedera.topicId) {
       try {
-        const entries = await readTopic(50, config.hedera.topicId, "desc");
+        // Feed anchors (x402 responses) share the topic and can outnumber task transitions many times over.
+        // The ledger shows task transitions only, paging back up to 1,000 messages, cached for 15 s.
+        if (!taskLogCache || Date.now() - taskLogCache.at > 15_000) {
+          const [entries, newest] = await Promise.all([
+            readTopic(50, config.hedera.topicId, "desc", { keep: (m) => m.kind === "task", maxPages: 10 }),
+            readTopic(1, config.hedera.topicId, "desc"),
+          ]);
+          taskLogCache = { at: Date.now(), entries, latest: newest[0]?.sequence ?? entries[0]?.sequence ?? null };
+        }
+        const entries = taskLogCache.entries;
+        hcsLatest = taskLogCache.latest;
         log = entries.map((e) => ({
           event: "event" in e ? e.event : e.kind,
           kind: e.kind,
@@ -792,7 +805,7 @@ export function mount(app: Hono, db: Db) {
         medianSecondsToPay: stats.medianSecondsToPay,
         autoReleaseShare: stats.autoReleaseShare,
         disputeRate: stats.disputeRate,
-        hcsLatest: (log[0] as { sequence?: number } | undefined)?.sequence ?? null,
+        hcsLatest,
       },
       log,
       leaderboard: publicScores(db).map((row) => ({

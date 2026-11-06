@@ -35,12 +35,19 @@ export type TopicEntry = HcsMessage & { sequence: number; consensusTimestamp: st
  * `order: "asc"` pages from sequence 1 (the whole history, for recomputing scores). `"desc"` returns the newest
  * messages first; use it for anything that shows recent activity, or a busy topic only ever shows its oldest entries.
  */
-export async function readTopic(limit = 100, topicId = config.hedera.topicId, order: "asc" | "desc" = "asc"): Promise<TopicEntry[]> {
+export async function readTopic(
+  limit = 100,
+  topicId = config.hedera.topicId,
+  order: "asc" | "desc" = "asc",
+  opts: { keep?: (m: HcsMessage) => boolean; maxPages?: number } = {},
+): Promise<TopicEntry[]> {
   if (!topicId) return [];
   const base = MIRROR_NODE[config.hedera.network as HederaNetwork];
   const out: TopicEntry[] = [];
-  let url: string | null = `${base}/api/v1/topics/${topicId}/messages?order=${order}&limit=${Math.min(limit, 100)}`;
-  while (url && out.length < limit) {
+  // With a filter, ask for full pages: the matches can be sparse among other message kinds.
+  let url: string | null = `${base}/api/v1/topics/${topicId}/messages?order=${order}&limit=${opts.keep ? 100 : Math.min(limit, 100)}`;
+  let pages = 0;
+  while (url && out.length < limit && pages++ < (opts.maxPages ?? Infinity)) {
     const res: Response = await fetch(url, { signal: AbortSignal.timeout(20_000) });
     if (!res.ok) throw new Error(`mirror node ${res.status}`);
     const data = (await res.json()) as { messages?: { message: string; sequence_number: number; consensus_timestamp: string }[]; links?: { next?: string } };
@@ -48,6 +55,7 @@ export async function readTopic(limit = 100, topicId = config.hedera.topicId, or
       try {
         const parsed = JSON.parse(Buffer.from(m.message, "base64").toString("utf8"));
         const msg = parseHcsMessage(parsed);
+        if (opts.keep && !opts.keep(msg)) continue;
         out.push({ ...msg, sequence: m.sequence_number, consensusTimestamp: m.consensus_timestamp });
       } catch {
         /* someone else's message, or a message that carries a World sub */
