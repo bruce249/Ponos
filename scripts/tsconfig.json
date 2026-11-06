@@ -1,0 +1,7 @@
+{
+  "extends": "../tsconfig.base.json",
+  "include": ["./**/*.ts", "../stablecoin/**/*.ts"],
+  "compilerOptions": {
+    "noEmit": true
+  }
+}
