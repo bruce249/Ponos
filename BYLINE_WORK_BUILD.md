@@ -2,7 +2,7 @@
 
 Companion to [BYLINE_WORK.md](BYLINE_WORK.md). The spec says what we are building. This file says in what order, what "done" means at each step, and which gaps in the spec we close before writing code.
 
-Status, 2026-11-06: **code written and tested locally, not yet run on testnet.** Contracts (46 Foundry tests: 41 unit and fuzz, 5 invariants), the API, the web app, the stablecoin scripts and the x402 service exist and pass `forge test`, `npm test` (40) and `npm run typecheck`. No `.env`, accounts, bUSD token, escrow deployment or HCS topic exist yet, so gates G0, G1 (testnet half), G2, G4 and G6 are open. See [section 2](#2-decisions-to-make-before-code) for the decision log and `npm run preflight` for what each testnet step still needs.
+Status, 2026-11-06: **code written and tested locally. Testnet: topic, 16 role accounts and bUSD exist (spike S1 done); the escrow is not deployed yet.** Contracts (46 Foundry tests: 41 unit and fuzz, 5 invariants), the API, the web app, the stablecoin scripts and the x402 service exist and pass `forge test`, `npm test` (40) and `npm run typecheck`. No `.env`, accounts, bUSD token, escrow deployment or HCS topic exist yet, so gates G0, G1 (testnet half), G2, G4 and G6 are open. See [section 2](#2-decisions-to-make-before-code) for the decision log and `npm run preflight` for what each testnet step still needs.
 
 ---
 
@@ -75,7 +75,7 @@ None of S1 to S8 has been run. Fill this in as each one completes.
 
 | Spike | Result | Tx ids / links | Date |
 |---|---|---|---|
-| S1 bUSD with Stablecoin Studio | not run | | |
+| S1 bUSD with Stablecoin Studio | **done 2026-11-06.** Token `0.0.11340549`, proxy `0x6f0ad3a58548e1d327e6896116784beb4ddff4f3` (`0.0.11340548`), reserve `0.0.11340547`. KYC, freeze, wipe and pause keys set; supply 0, 6 decimals. Fixed HBAR fee of 1 tinybar to the treasury on chain. Not yet tested: a cash-in above the reserve failing (TOK-02). A second, unused token `0.0.11340685` also exists from a duplicate create run. | [token](https://hashscan.io/testnet/token/0.0.11340549) · fee tx `0.0.11339160@1793976988.922104289` | 2026-11-06 |
 | S2 contract holds bUSD | not run | | |
 | S3 HIP-1215 `scheduleCall` | not run | | |
 | S3b SDK schedule | not run | | |

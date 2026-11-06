@@ -160,4 +160,5 @@ async function main() {
 const invoked = process.argv[1]?.replace(/\\/g, "/") ?? "";
 if (invoked.endsWith("lifecycle.ts") || invoked.endsWith("lifecycle.js")) {
   await main();
+  process.exit(0); // the SDK keeps handles open; do not hang after the command is done
 }

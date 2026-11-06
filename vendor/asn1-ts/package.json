@@ -1,0 +1,14 @@
+{
+  "name": "asn1-ts",
+  "version": "8.0.6",
+  "description": "ESM bridge for asn1-ts 8.0.5. Node 24 cannot see its named exports from an ES module import, which breaks @hashgraph/stablecoin-npm-sdk. Re-exports the real package.",
+  "private": true,
+  "type": "module",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js"
+  },
+  "dependencies": {
+    "asn1-ts-cjs": "npm:asn1-ts@8.0.5"
+  }
+}

@@ -6,7 +6,7 @@
  *   npm run busd
  */
 import { decimalToBase } from "@byline-work/shared";
-import { addTinyHbarFee, createCoin, missing } from "./client";
+import { addTinyHbarFee, associateAccount, createCoin, ensureKyc, missing, need } from "./client";
 
 const required = [
   "SCS_ADMIN_ACCOUNT_ID",
@@ -36,6 +36,8 @@ const proxy = created.coin.evmProxyAddress?.toString() || created.coin.proxyAddr
 const reserve = created.reserve?.proxyAddress?.toString() || created.coin.reserveAddress?.toString() || "";
 let feeTx = "";
 try {
+  console.log(`# treasury association: ${await associateAccount(need("TREASURY_ACCOUNT_ID"), need("TREASURY_PRIVATE_KEY"), tokenId)}`);
+  console.log(`# treasury KYC: ${await ensureKyc(need("TREASURY_ACCOUNT_ID"), tokenId)}`);
   feeTx = await addTinyHbarFee(tokenId);
 } catch (e: unknown) {
   console.error(`Token ${tokenId} exists, but the HBAR custom fee was not set: ${e instanceof Error ? e.message : e}`);
@@ -43,8 +45,11 @@ try {
 }
 
 console.log(`BUSD_TOKEN_ID=${tokenId}`);
+console.log(`BUSD_TOKEN_EVM=0x${BigInt(tokenId.split(".")[2] ?? "0").toString(16).padStart(40, "0")}`);
 if (proxy) console.log(`BUSD_SCS_PROXY=${proxy}`);
 if (reserve) console.log(`BUSD_RESERVE_ADDRESS=${reserve}`);
 console.log(`# reserve initial amount base units: ${decimalToBase("0")}`);
 if (feeTx) console.log(`# custom fee tx (1 tinybar HBAR, treasury exempt): ${feeTx}`);
 console.log(`# https://hashscan.io/testnet/token/${tokenId}`);
+// The SDK keeps network handles open. Without this the process sits for many minutes after printing.
+process.exit(0);

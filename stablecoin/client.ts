@@ -2,7 +2,16 @@
  * Stablecoin Studio session. Types and method names match @hashgraph/stablecoin-npm-sdk 4.4.0.
  * CONFIG_SC / CONFIG_RESERVE / version 1 are that package's own constants, not a token id.
  */
-import {
+import { createRequire } from "node:module";
+import type * as Sdk from "@hashgraph/stablecoin-npm-sdk";
+import { AccountId, Client, TokenAssociateTransaction, TokenId, type PrivateKey } from "@hiero-ledger/sdk";
+import { parseHederaKey } from "@byline-work/shared";
+
+// Load the SDK's CommonJS build. Its ES-module build (the one `import` picks in an ESM project)
+// is broken under Node 24: HederaWalletConnectTransactionAdapter.js calls require() in a file that
+// also uses top-level await. Types still come from the package.
+const sdk = createRequire(import.meta.url)("@hashgraph/stablecoin-npm-sdk") as typeof Sdk;
+const {
   Account,
   AddFixedFeeRequest,
   BurnRequest,
@@ -22,7 +31,8 @@ import {
   TokenSupplyType,
   UpdateReserveAmountRequest,
   WipeRequest,
-} from "@hashgraph/stablecoin-npm-sdk";
+} = sdk;
+type CreateRequest = Sdk.CreateRequest;
 
 /** SDK `CONFIG_SC`. Selects the stablecoin configuration. It is not a token id. */
 export const CONFIG_SC = "0x0000000000000000000000000000000000000000000000000000000000000002";
@@ -112,6 +122,43 @@ export function buildCreateRequest(): CreateRequest {
     cashInRoleAllowance: "1000000000",
     metadata: "byline-work demo bUSD",
   });
+}
+
+/**
+ * The fee collector must be associated with the token before Stablecoin Studio accepts a fixed fee
+ * for it ("account ... is not associated to the token"). Auto-association only happens on first
+ * receipt, so the treasury is associated explicitly. Safe to repeat: an existing association is fine.
+ */
+export async function associateAccount(accountId: string, privateKey: string, tokenId: string): Promise<string> {
+  const known = await fetch(`${MIRROR}accounts/${accountId}/tokens?token.id=${tokenId}`).then((r) => (r.ok ? r.json() : null)).catch(() => null) as { tokens?: unknown[] } | null;
+  if (known?.tokens?.length) return "already associated";
+  const client = process.env.HEDERA_NETWORK === "hedera:mainnet" ? Client.forMainnet() : Client.forTestnet();
+  const key = parseHederaKey(privateKey) as unknown as PrivateKey;
+  client.setOperator(AccountId.fromString(accountId), key);
+  try {
+    const tx = await new TokenAssociateTransaction().setAccountId(AccountId.fromString(accountId)).setTokenIds([TokenId.fromString(tokenId)]).execute(client);
+    const receipt = await tx.getReceipt(client);
+    return `${receipt.status.toString()} ${tx.transactionId.toString()}`;
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (/TOKEN_ALREADY_ASSOCIATED/.test(msg)) return "already associated";
+    throw e;
+  } finally {
+    client.close();
+  }
+}
+
+/** Grant KYC, treating "already granted" as success. The fee collector needs KYC because bUSD has a KYC key. */
+export async function ensureKyc(targetId: string, tokenId: string): Promise<string> {
+  const known = await fetch(`${MIRROR}accounts/${targetId}/tokens?token.id=${tokenId}`).then((r) => (r.ok ? r.json() : null)).catch(() => null) as { tokens?: { kyc_status?: string }[] } | null;
+  if (known?.tokens?.[0]?.kyc_status === "GRANTED") return "already granted";
+  try {
+    return await grantKyc(targetId, tokenId);
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (/already/i.test(msg)) return "already granted";
+    throw e;
+  }
 }
 
 /** 1 tinybar, paid in HBAR, so the fee cannot skim the escrow's bUSD balance. Treasury is the collector and is exempt. */

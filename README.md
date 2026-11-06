@@ -79,7 +79,7 @@ New in this repo: the escrow contract, the escrow client, the mirror-node indexe
 
 ## Status
 
-Written and tested locally. **Not yet run on Hedera testnet.** `forge test` (46 tests: 41 unit and fuzz, 5 invariants), `npm test` (40) and `npm run typecheck` pass, but those use a mock token and a mock schedule service. The HIP-1215 schedule call and the Stablecoin Studio SDK calls are unproven until the spikes in `BYLINE_WORK_BUILD.md` run. `npm run e2e` fails, rather than passing quietly, if the schedule does not fire and only the keeper paid.
+Written and tested locally. On testnet so far: the HCS topic, the role accounts and bUSD (token `0.0.11340549`). **The escrow is not deployed yet.** `forge test` (46 tests: 41 unit and fuzz, 5 invariants), `npm test` (40) and `npm run typecheck` pass, but those use a mock token and a mock schedule service. The HIP-1215 schedule call and the Stablecoin Studio SDK calls are unproven until the spikes in `BYLINE_WORK_BUILD.md` run. `npm run e2e` fails, rather than passing quietly, if the schedule does not fire and only the keeper paid.
 
 ## Reviewers and large payouts
 
