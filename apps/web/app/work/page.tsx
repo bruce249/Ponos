@@ -380,24 +380,34 @@ function TaskCard({ task, onDone }: { task: WorkTask; onDone: (note: FlashNote) 
 function FreezePanel({ onDone }: { onDone: (note: FlashNote) => void }) {
   const [accountId, setAccountId] = useState("");
   const [busy, setBusy] = useState(false);
+  // Shown inside the panel: the page-level notice sits at the top, out of view when this panel is used.
+  const [note, setNote] = useState<FlashNote | null>(null);
   const valid = /^0\.0\.\d+$/.test(accountId.trim());
 
   async function freeze(e: FormEvent) {
     e.preventDefault();
+    const id = accountId.trim();
     setBusy(true);
+    setNote(null);
+    let result: FlashNote;
     try {
-      const res = await api("/api/compliance/freeze", { method: "POST", body: JSON.stringify({ accountId: accountId.trim() }) });
-      onDone({
-        kind: "warn",
-        title: "Freeze submitted.",
-        text: "Demo custody. The compliance key signed this. Confirm the account is frozen on HashScan.",
-        refs: chainRefs(res, { accountId: accountId.trim() }),
-      });
+      const res = await api("/api/compliance/freeze", { method: "POST", body: JSON.stringify({ accountId: id }) });
+      result = {
+        kind: "good",
+        title: `${id} is frozen for bUSD.`,
+        text: "Signed by the compliance key (demo custody). Any bUSD transfer from this account is now refused by Hedera.",
+        refs: chainRefs(res, { accountId: id }),
+      };
     } catch (err) {
-      onDone({ kind: "bad", title: "Freeze failed", text: errorMessage(err) });
+      const msg = errorMessage(err);
+      result = /ACCOUNT_FROZEN_FOR_TOKEN/i.test(msg)
+        ? { kind: "info", title: `${id} is already frozen.`, text: "Nothing changed. Check its token status on HashScan.", refs: { accountId: id } }
+        : { kind: "bad", title: "Freeze failed", text: msg };
     } finally {
       setBusy(false);
     }
+    setNote(result);
+    onDone(result);
   }
 
   return (
@@ -412,6 +422,7 @@ function FreezePanel({ onDone }: { onDone: (note: FlashNote) => void }) {
       <button className="btn" type="submit" disabled={!valid || busy} style={{ marginTop: 12 }}>
         {busy ? "Freezing…" : "Freeze account"}
       </button>
+      <Flash flash={note} />
     </form>
   );
 }
