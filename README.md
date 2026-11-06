@@ -88,7 +88,7 @@ Proven on testnet (2026-11-06, tx ids in `BYLINE_WORK_BUILD.md` section 2):
 - Freeze: a frozen account's bUSD transfer is refused with `ACCOUNT_FROZEN_FOR_TOKEN`.
 - Redeem: transfer to the treasury, then wipe and a reserve decrease. The SDK burn fails on testnet, so the wipe fallback is the path in use.
 
-`forge test` (44 tests across the unit, fuzz and invariant suites), `npm test` (41) and `npm run typecheck` pass. World ID login redirects correctly in production. A full login with `acr` needs the World App and has not been run headless.
+`forge test` (44 tests across the unit, fuzz and invariant suites), `npm test` (41) and `npm run typecheck` pass. World ID login redirects correctly in production. A full login with `acr` needs the World App and has not been run headless. The World integration, its denied paths and the integration feedback are in [docs/WORLD_DEBRIEF.md](docs/WORLD_DEBRIEF.md).
 
 ## Reviewers and large payouts
 
@@ -107,6 +107,47 @@ The lab and review desks are demo desks. Without that header they use the first 
 | `/x402/client/:id/stats` | a lab's funding history, median seconds to pay, share paid, hold rate |
 
 Every response is EIP-191 signed and its hash is anchored on HCS.
+
+### Payment flow
+
+Prices are in tinybars, paid in HBAR to the operator account through the [Blocky402](https://api.testnet.blocky402.com) facilitator on Hedera testnet. No human approves a payment.
+
+```mermaid
+sequenceDiagram
+  participant A as Agent (scripts/buy-nav.ts)
+  participant S as Byline API /x402/busd/nav
+  participant F as Blocky402 facilitator
+  participant H as Hedera testnet
+  A->>S: GET (no payment)
+  S-->>A: 402 + PAYMENT-REQUIRED (100,000 tinybar to 0.0.11334686)
+  A->>A: spend controls: network, asset = HBAR, amount ≤ cap
+  A->>S: GET + signed payment payload
+  S->>F: verify and settle
+  F->>H: transfer, consensus
+  S->>H: HCS anchor of the response hash
+  S-->>A: 200 + NAV body, EIP-191 signature, hcsSequence
+  A->>A: verify signature and the HCS anchor
+```
+
+1. The agent requests the route and gets `402` with a base64 `PAYMENT-REQUIRED` header: scheme `exact`, network `hedera:testnet`, amount and `payTo`.
+2. `packages/shared/src/x402-payer.ts` checks the request against its spend controls before signing: HBAR only, this network only, and the amount at or below both the price it expected and its own cap (`maxTinybar`). Anything else is refused without paying.
+3. It retries with the payment. The API settles through the facilitator, signs the body (EIP-191, `FEED_SIGNER_KEY`) and anchors the body hash on HCS.
+4. The agent recovers the signer and reads the anchored HCS message by its sequence number.
+
+**Settled payment on testnet** (`npm run buy-nav`, 2026-11-06):
+
+| What | Value |
+|---|---|
+| Transaction id | `0.0.7162784@1793996607.990961596` ([HashScan](https://hashscan.io/testnet/transaction/0.0.7162784-1793996607-990961596)) |
+| Amount | 100,000 tinybar (0.001 HBAR) to `0.0.11334686` |
+| Signer | `0x98f62AB93f23911Cd5110909AF9269d7a8AC3880` |
+| HCS anchor | [topic 0.0.11339787, message 1362](https://hashscan.io/testnet/topic/0.0.11339787/message/1362) |
+
+Run it yourself against a local API (`npm run dev:api`) or the live one:
+
+```bash
+API_PUBLIC_URL=https://ponos-byline-api.onrender.com npm run buy-nav
+```
 
 ## Architecture
 
