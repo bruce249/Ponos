@@ -43,14 +43,14 @@ export default function ReviewPage() {
 
   return (
     <>
-      <div className="kicker">Reviewer entry</div>
+      <div className="kicker">Review</div>
       <h1>A reviewer can stop a large payment. They cannot stall it.</h1>
       <p className="lede">
         This desk is the allowlisted reviewer, labelled separately from the freelancer&apos;s World ID login. Approve pays now. Hold needs a written reason.
         Resolve splits a dispute: 0 sends the pay back to the lab, 10000 pays the freelancer in full.
       </p>
 
-      <div className="card">
+      <div className="slip">
         <h2>Reviewer entry</h2>
         <p className="sub">The API returns 403 when this browser is not the reviewer. The queue refreshes every 3 seconds.</p>
         {reviewer && /^0\.0\.\d+$/.test(reviewer) ? (
@@ -82,9 +82,9 @@ export default function ReviewPage() {
       )}
       <Flash flash={flash} />
 
-      {loaded && !error && items.length === 0 && <div className="empty" style={{ marginTop: 16 }}>The reviewer queue is empty.</div>}
+      {loaded && !error && items.length === 0 && <p className="empty" style={{ marginTop: 16, color: "var(--muted-ink)" }}>The reviewer queue is empty.</p>}
       {!loaded && !error && (
-        <p className="hint" style={{ marginTop: 16 }}>
+        <p className="hint page-hint" style={{ marginTop: 16 }}>
           <span className="spinner" /> Loading the queue…
         </p>
       )}
@@ -123,57 +123,58 @@ function ReviewCard({ item, onDone }: { item: ReviewItem; onDone: (note: FlashNo
   }
 
   return (
-    <article className="card">
-      <div className="row">
-        <h2 style={{ margin: 0 }}>{item.title}</h2>
-        <StateBadge state={item.state} />
-        {item.pay && <Money amount={`$${item.pay}`} refs={item.refs} prefer="tx" />}
+    <article className="queue">
+      <div className="queue-main">
+        <div className="row">
+          <h2 style={{ margin: 0 }}>{item.title}</h2>
+          <StateBadge state={item.state} />
+          {item.pay && <Money amount={`$${item.pay}`} refs={item.refs} prefer="tx" />}
+        </div>
+        <p className="hint" style={{ marginTop: 6 }}>
+          Task {item.taskId}
+          {item.batchId ? ` · batch ${item.batchId}` : ""}
+          {item.worker ? (
+            <>
+              {" "}
+              · worker{" "}
+              <a href={hashscanAccount(item.worker)} target="_blank" rel="noreferrer">
+                {item.worker} ↗
+              </a>
+            </>
+          ) : null}
+        </p>
+        <Countdown deadline={item.reviewDeadline} label="Review deadline" />
+        {item.prompt && <div className="prompt">{item.prompt}</div>}
+        {item.reason && <p className="hint">Reason on file: {item.reason}</p>}
+        <RefLinks refs={item.refs} />
       </div>
-      <p className="hint" style={{ marginTop: 6 }}>
-        Task {item.taskId}
-        {item.batchId ? ` · batch ${item.batchId}` : ""}
-        {item.worker ? (
-          <>
-            {" "}
-            · worker{" "}
-            <a href={hashscanAccount(item.worker)} target="_blank" rel="noreferrer">
-              {item.worker} ↗
-            </a>
-          </>
-        ) : null}
-      </p>
-      <Countdown deadline={item.reviewDeadline} label="Review deadline" />
-      {item.prompt && <div className="prompt">{item.prompt}</div>}
-      {item.reason && <p className="hint">Reason on file: {item.reason}</p>}
-      <RefLinks refs={item.refs} />
-
-      <div className="row" style={{ marginTop: 14 }}>
-        <button className="btn sm" disabled={busy != null} onClick={() => void act("approve")}>
-          {busy === "approve" ? "Approving…" : "Approve"}
-        </button>
-        {item.approvalsRequired > 1 && (
-          <span className="hint">
-            Two reviewers needed above this amount: {item.approvals}/{item.approvalsRequired} approved. Silence still pays the worker at the deadline.
-          </span>
-        )}
+      <div className="queue-acts">
+        <div className="row">
+          <button className="btn sm" disabled={busy != null} onClick={() => void act("approve")}>
+            {busy === "approve" ? "Approving…" : "Approve"}
+          </button>
+          {item.approvalsRequired > 1 && (
+            <span className="hint">
+              Two reviewers needed above this amount: {item.approvals}/{item.approvalsRequired} approved. Silence still pays the worker at the deadline.
+            </span>
+          )}
+        </div>
+        <label htmlFor={`reason-${item.taskId}`}>Hold reason</label>
+        <textarea id={`reason-${item.taskId}`} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Why this payout should stop." style={{ minHeight: 70 }} />
+        <div className="row" style={{ marginTop: 8 }}>
+          <button className="btn sm ghost" disabled={busy != null || reason.trim().length < 3} onClick={() => void act("hold")}>
+            {busy === "hold" ? "Holding…" : "Hold"}
+          </button>
+        </div>
+        <label htmlFor={`bps-${item.taskId}`}>Worker basis points (0–10000)</label>
+        <div className="row">
+          <input id={`bps-${item.taskId}`} className="grow" value={bps} onChange={(e) => setBps(e.target.value)} inputMode="numeric" />
+          <button className="btn sm ghost" disabled={busy != null || !bpsOk} onClick={() => void act("resolve")}>
+            {busy === "resolve" ? "Resolving…" : "Resolve"}
+          </button>
+        </div>
+        <p className="hint">0 refunds the client. 10000 pays the worker the full amount. The fee follows the same split.</p>
       </div>
-
-      <label htmlFor={`reason-${item.taskId}`}>Hold reason</label>
-      <textarea id={`reason-${item.taskId}`} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Why this payout should stop." style={{ minHeight: 70 }} />
-      <div className="row" style={{ marginTop: 8 }}>
-        <button className="btn sm ghost" disabled={busy != null || reason.trim().length < 3} onClick={() => void act("hold")}>
-          {busy === "hold" ? "Holding…" : "Hold"}
-        </button>
-      </div>
-
-      <label htmlFor={`bps-${item.taskId}`}>Worker basis points (0–10000)</label>
-      <div className="row">
-        <input id={`bps-${item.taskId}`} className="grow" value={bps} onChange={(e) => setBps(e.target.value)} inputMode="numeric" />
-        <button className="btn sm ghost" disabled={busy != null || !bpsOk} onClick={() => void act("resolve")}>
-          {busy === "resolve" ? "Resolving…" : "Resolve"}
-        </button>
-      </div>
-      <p className="hint">0 refunds the client. 10000 pays the worker the full amount. The fee follows the same split.</p>
     </article>
   );
 }

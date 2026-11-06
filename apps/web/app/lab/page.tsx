@@ -144,110 +144,119 @@ export default function LabPage() {
         </div>
       )}
 
-      <div className="cols" style={{ marginTop: 8 }}>
-        <form className="card" onSubmit={fund}>
+      <form className="sheet" onSubmit={fund}>
+        <div className="sheet-head">
           <h2>New batch</h2>
           <p className="sub">Pay is in dollars per task. Windows default to 120 seconds so a timeout can happen on camera.</p>
-          <label htmlFor="title">Title</label>
-          <input id="title" value={form.title} onChange={set("title")} placeholder="Review Python solutions" maxLength={140} />
-          <div className="grid2" style={{ gap: 12 }}>
-            <div>
-              <label htmlFor="pay">Pay in dollars</label>
-              <input id="pay" value={form.pay} onChange={set("pay")} inputMode="decimal" />
-            </div>
-            <div>
-              <label htmlFor="count">Count</label>
-              <input id="count" value={form.count} onChange={set("count")} inputMode="numeric" />
-            </div>
+        </div>
+        <div className="sheet-grid">
+          <div>
+            <label htmlFor="title">Title</label>
+            <input id="title" value={form.title} onChange={set("title")} placeholder="Review Python solutions" maxLength={140} />
           </div>
-          <label htmlFor="qaMode">QA mode</label>
-          <select id="qaMode" value={form.qaMode} onChange={set("qaMode")}>
-            <option value="auto">auto</option>
-            <option value="manual">manual</option>
-          </select>
-          <p className="hint">Auto grades the gold answer. Manual waits, so the scheduled release can be the thing that pays.</p>
-          <div className="grid3">
-            <div>
-              <label htmlFor="reviewWindow">Review window (seconds)</label>
-              <input id="reviewWindow" value={form.reviewWindow} onChange={set("reviewWindow")} inputMode="numeric" />
-            </div>
-            <div>
-              <label htmlFor="workWindow">Work window (seconds)</label>
-              <input id="workWindow" value={form.workWindow} onChange={set("workWindow")} inputMode="numeric" />
-            </div>
-            <div>
-              <label htmlFor="revisionWindow">Revision window (seconds)</label>
-              <input id="revisionWindow" value={form.revisionWindow} onChange={set("revisionWindow")} inputMode="numeric" />
-            </div>
+          <div>
+            <label htmlFor="qaMode">QA mode</label>
+            <select id="qaMode" value={form.qaMode} onChange={set("qaMode")}>
+              <option value="auto">auto</option>
+              <option value="manual">manual</option>
+            </select>
+            <p className="hint">Auto grades the gold answer. Manual waits, so the scheduled release can be the thing that pays.</p>
           </div>
-          <label htmlFor="prompt">Prompt</label>
-          <textarea id="prompt" value={form.prompt} onChange={set("prompt")} placeholder="What the freelancer is asked to do." />
-          <label htmlFor="rubric">Rubric</label>
-          <textarea id="rubric" value={form.rubric} onChange={set("rubric")} placeholder="What a pass looks like." style={{ minHeight: 80 }} />
-          <label htmlFor="goldQuestion">Gold question</label>
-          <input id="goldQuestion" value={form.goldQuestion} onChange={set("goldQuestion")} />
-          <label htmlFor="goldAnswer">Gold answer</label>
-          <input id="goldAnswer" value={form.goldAnswer} onChange={set("goldAnswer")} />
-          <p className="hint">The gold answer stays on the server. It is not shown on the work desk.</p>
-          <div className="row" style={{ marginTop: 16 }}>
-            <button className="btn" type="submit" disabled={busy}>
-              {busy ? "Funding…" : "Create and fund"}
-            </button>
-            {preview && <span className="hint">Posted pay ${preview} before the platform fee. The funded total comes back from the escrow.</span>}
+          <div>
+            <label htmlFor="pay">Pay in dollars</label>
+            <input id="pay" value={form.pay} onChange={set("pay")} inputMode="decimal" />
           </div>
+          <div>
+            <label htmlFor="count">Count</label>
+            <input id="count" value={form.count} onChange={set("count")} inputMode="numeric" />
+          </div>
+          <div>
+            <label htmlFor="reviewWindow">Review window (seconds)</label>
+            <input id="reviewWindow" value={form.reviewWindow} onChange={set("reviewWindow")} inputMode="numeric" />
+          </div>
+          <div>
+            <label htmlFor="workWindow">Work window (seconds)</label>
+            <input id="workWindow" value={form.workWindow} onChange={set("workWindow")} inputMode="numeric" />
+          </div>
+          <div>
+            <label htmlFor="revisionWindow">Revision window (seconds)</label>
+            <input id="revisionWindow" value={form.revisionWindow} onChange={set("revisionWindow")} inputMode="numeric" />
+          </div>
+          <div>
+            <label htmlFor="goldQuestion">Gold question</label>
+            <input id="goldQuestion" value={form.goldQuestion} onChange={set("goldQuestion")} />
+          </div>
+          <div>
+            <label htmlFor="prompt">Prompt</label>
+            <textarea id="prompt" value={form.prompt} onChange={set("prompt")} placeholder="What the freelancer is asked to do." />
+          </div>
+          <div>
+            <label htmlFor="rubric">Rubric</label>
+            <textarea id="rubric" value={form.rubric} onChange={set("rubric")} placeholder="What a pass looks like." style={{ minHeight: 110 }} />
+            <label htmlFor="goldAnswer">Gold answer</label>
+            <input id="goldAnswer" value={form.goldAnswer} onChange={set("goldAnswer")} />
+            <p className="hint">The gold answer stays on the server. It is not shown on the work desk.</p>
+          </div>
+        </div>
+        <div className="sheet-foot">
+          <button className="btn" type="submit" disabled={busy}>
+            {busy ? "Funding…" : "Create and fund"}
+          </button>
+          {preview && <span className="hint">Posted pay ${preview} before the platform fee. The funded total comes back from the escrow.</span>}
           {formError && <p className="hint" style={{ color: "var(--bad)" }}>{formError}</p>}
-        </form>
+        </div>
+      </form>
 
-        <section className="card">
-          <h2>Batches</h2>
-          <p className="sub">Funded means the pay is locked. Open a transaction to see it on HashScan.</p>
-          {!loaded && !loadError && (
-            <p className="hint">
-              <span className="spinner" /> Loading batches…
-            </p>
-          )}
-          {loaded && !loadError && batches.length === 0 && <div className="empty">No batches yet. Fund one and it will show up here.</div>}
-          {batches.length > 0 && (
-            <div className="scroll">
-              <table className="tbl">
-                <thead>
-                  <tr>
-                    <th>Batch</th>
-                    <th>Pay</th>
-                    <th>Tasks</th>
-                    <th>QA</th>
-                    <th>Status</th>
-                    <th>Locked</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {batches.map((b) => (
-                    <tr key={b.id}>
-                      <td>
-                        <div>{b.title}</div>
-                        <div className="hint mono">{b.id}</div>
-                      </td>
-                      <td>{b.pay ? <Money amount={`$${b.pay}`} refs={b.refs} prefer="tx" /> : "—"}</td>
-                      <td>
-                        {b.count ?? "—"}
-                        {b.unclaimed != null && <div className="hint">{b.unclaimed} unclaimed</div>}
-                      </td>
-                      <td>{b.qaMode || "—"}</td>
-                      <td>
-                        <StateBadge state={b.status} />
-                      </td>
-                      <td>
-                        {b.locked ? <Money amount={`$${b.locked}`} refs={b.refs} prefer="tx" /> : "—"}
-                        <RefLinks refs={b.refs} />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </section>
-      </div>
+      <section className="band">
+        <h2>Batches</h2>
+        <p className="sub">Funded means the pay is locked. Open a transaction to see it on HashScan.</p>
+        {!loaded && !loadError && (
+          <p className="hint">
+            <span className="spinner" /> Loading batches…
+          </p>
+        )}
+        {loaded && !loadError && batches.length === 0 && <p className="empty">No batches yet. Fund one and it will show up here.</p>}
+        {batches.length > 0 && (
+          <ul className="batch-list">
+            {batches.map((b) => (
+              <li className="batch" key={b.id}>
+                <div>{b.title}</div>
+                <div className="hint mono">{b.id}</div>
+                <dl>
+                  <div>
+                    <dt>Pay</dt>
+                    <dd>{b.pay ? <Money amount={`$${b.pay}`} refs={b.refs} prefer="tx" /> : "—"}</dd>
+                  </div>
+                  <div>
+                    <dt>Tasks</dt>
+                    <dd>
+                      {b.count ?? "—"}
+                      {b.unclaimed != null && <div className="hint">{b.unclaimed} unclaimed</div>}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>QA</dt>
+                    <dd>{b.qaMode || "—"}</dd>
+                  </div>
+                  <div>
+                    <dt>Status</dt>
+                    <dd>
+                      <StateBadge state={b.status} />
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Locked</dt>
+                    <dd>
+                      {b.locked ? <Money amount={`$${b.locked}`} refs={b.refs} prefer="tx" /> : "—"}
+                      <RefLinks refs={b.refs} />
+                    </dd>
+                  </div>
+                </dl>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
     </>
   );
 }

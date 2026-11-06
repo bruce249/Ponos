@@ -114,10 +114,18 @@ function Work() {
     <>
       <div className="kicker">Work</div>
       <h1>Claim the task. The deadline pays you if nobody else does.</h1>
-      <p className="lede">
-        Sign in with World ID, bind the account that should receive bUSD, then claim and submit. The review countdown ticks here. The wallet line is your bUSD
-        balance and its rupee value.
-      </p>
+      <p className="lede">Sign in with World ID, bind the account that should receive bUSD, then claim and submit.</p>
+
+      {!me.signedIn && (
+        <section className="band">
+          <h2>World ID</h2>
+          <p className="sub">One person, one account. The session cookie stays on this origin.</p>
+          <a className="btn world" href="/api/world/login">
+            Log in with World ID
+          </a>
+          <p className="hint">Sign in to see your bUSD balance and its rupee value.</p>
+        </section>
+      )}
 
       {meError && <div className="notice bad">{meError}</div>}
       {stateError && <div className="notice bad">{stateError}</div>}
@@ -129,12 +137,11 @@ function Work() {
       )}
       <Flash flash={flash} />
 
-      <div className="grid2" style={{ marginTop: 8 }}>
-        <section className="card">
-          <h2>World ID</h2>
-          <p className="sub">One person, one account. The session cookie stays on this origin.</p>
-          {me.signedIn ? (
-            <>
+      <section className="band">
+        <h2>Payout</h2>
+        {me.signedIn ? (
+          <div className="identity">
+            <div className="row-line">
               <p>
                 Signed in{me.verified ? " · verified human" : ""}.
                 {me.accountId && (
@@ -147,21 +154,10 @@ function Work() {
                   </>
                 )}
               </p>
-              <button className="btn ghost sm" type="button" onClick={() => void logout()} style={{ marginTop: 10 }}>
+              <button className="btn ghost sm" type="button" onClick={() => void logout()}>
                 Log out
               </button>
-            </>
-          ) : (
-            <a className="btn world" href="/api/world/login">
-              Log in with World ID
-            </a>
-          )}
-        </section>
-
-        <section className="card">
-          <div className="kicker">Wallet</div>
-          <h2>bUSD and rupees</h2>
-          {me.signedIn ? (
+            </div>
             <div className="wallet-figs">
               <div className="fig">
                 {me.busd ? <Money amount={`${me.busd} bUSD`} refs={walletRefs} prefer="token" className="" /> : <span className="hint">bUSD balance pending</span>}
@@ -170,39 +166,34 @@ function Work() {
                 {me.inr ? <Money amount={inrText(me.inr)} refs={walletRefs} prefer="account" className="" /> : <span className="hint">Rupee value pending</span>}
               </div>
             </div>
-          ) : (
-            <p className="hint">Sign in to see your bUSD balance and its rupee value.</p>
-          )}
-          {me.fx && <p className="hint">{me.fx}</p>}
-          <RefLinks refs={walletRefs} />
-        </section>
-      </div>
-
-      <div style={{ marginTop: 16 }}>
+            {me.fx && <p className="hint">{me.fx}</p>}
+            <RefLinks refs={walletRefs} />
+          </div>
+        ) : (
+          <p className="sub">Bind a payout account after you sign in. Pay is fixed to that account at claim time.</p>
+        )}
         <PayoutCard accountId={me.accountId} />
-      </div>
+      </section>
 
-      <h2 style={{ marginTop: 28 }}>Open tasks</h2>
-      <p className="hint">Funded batches with something left to claim. Over $100, claim starts a claim_high World ID step-up.</p>
-      {feed.length === 0 && <div className="empty">No funded unclaimed tasks right now.</div>}
-      {feed.length > 0 && (
-        <div className="listings">
-          {feed.map((item) => (
-            <FeedCard key={item.batchId} item={item} onDone={(note) => { setFlash(note); void load(); }} />
-          ))}
-        </div>
-      )}
+      <section className="band">
+        <h2>Claim</h2>
+        <p className="sub">Funded batches with something left to claim. Over $100, claim starts a claim_high World ID step-up.</p>
+        {feed.length === 0 && <p className="empty">No funded unclaimed tasks right now.</p>}
+        {feed.map((item) => (
+          <FeedCard key={item.batchId} item={item} onDone={(note) => { setFlash(note); void load(); }} />
+        ))}
+      </section>
 
-      <h2 style={{ marginTop: 28 }}>Your tasks</h2>
-      <p className="hint">State refreshes every 3 seconds. The review countdown moves every second without a reload.</p>
-      {tasks.length === 0 && <div className="empty" style={{ marginTop: 12 }}>You have no tasks in flight.</div>}
-      <div className="stack" style={{ marginTop: 12 }}>
+      <section className="band">
+        <h2>Submit</h2>
+        <p className="sub">State refreshes every 3 seconds. The review countdown moves every second without a reload.</p>
+        {tasks.length === 0 && <p className="empty">You have no tasks in flight.</p>}
         {tasks.map((task) => (
           <TaskCard key={task.taskId} task={task} onDone={(note) => { setFlash(note); void load(); }} />
         ))}
-      </div>
+      </section>
 
-      <div className="grid2" style={{ marginTop: 28 }}>
+      <div className="tools">
         <FreezePanel onDone={setFlash} />
         <RedeemPanel onDone={() => void load()} />
       </div>
@@ -214,8 +205,8 @@ function PayoutCard({ accountId }: { accountId: string | null }) {
   const [value, setValue] = useState("");
   const valid = /^0\.0\.\d+$/.test(value.trim());
   return (
-    <section className="card">
-      <h2>Payout account</h2>
+    <div>
+      <h3>Payout account</h3>
       <p className="sub">Enter a Hedera account id, then confirm it with the payout_wallet step-up. Pay is fixed to that account at claim time.</p>
       {accountId ? (
         <p>
@@ -240,7 +231,7 @@ function PayoutCard({ accountId }: { accountId: string | null }) {
           </button>
         )}
       </div>
-    </section>
+    </div>
   );
 }
 
@@ -261,7 +252,7 @@ function FeedCard({ item, onDone }: { item: FeedItem; onDone: (note: FlashNote) 
   }
 
   return (
-    <article className="listing">
+    <article className="claim-row">
       <div className="row">
         <h3>{item.title}</h3>
         <StateBadge state="Funded" />
@@ -274,7 +265,7 @@ function FeedCard({ item, onDone }: { item: FeedItem; onDone: (note: FlashNote) 
       </div>
       {item.prompt && <p className="summary">{item.prompt}</p>}
       <RefLinks refs={item.refs} />
-      <div className="foot">
+      <div className="row" style={{ marginTop: 10 }}>
         {high ? (
           <a className="btn sm world" href={stepUpHref("claim_high", item.batchId)}>
             Claim · step-up
@@ -330,9 +321,9 @@ function TaskCard({ task, onDone }: { task: WorkTask; onDone: (note: FlashNote) 
   }
 
   return (
-    <article className="card">
+    <article className="task">
       <div className="row">
-        <h2 style={{ margin: 0 }}>{task.title}</h2>
+        <h3>{task.title}</h3>
         <StateBadge state={task.state} />
         {task.pay && <Money amount={`$${task.pay}`} refs={task.refs} prefer="tx" />}
       </div>

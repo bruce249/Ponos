@@ -3,25 +3,29 @@ import Link from "next/link";
 const DESKS = [
   {
     href: "/lab",
-    kicker: "Lab",
+    index: "01",
+    name: "Lab",
     title: "Fund the batch",
     text: "Post the work, the pay, and the rubric. The escrow locks the money before anyone can claim a task.",
   },
   {
     href: "/work",
-    kicker: "Work",
+    index: "02",
+    name: "Work",
     title: "Claim and submit",
     text: "World ID, a payout account, and a live countdown. If nobody reviews in time, the scheduled release pays you.",
   },
   {
     href: "/review",
-    kicker: "Review",
+    index: "03",
+    name: "Review",
     title: "Approve, hold, or split",
     text: "Over $100 a reviewer decides. A hold needs a reason. Doing nothing does not stop the deadline.",
   },
   {
     href: "/transparency",
-    kicker: "Transparency",
+    index: "04",
+    name: "Ledger",
     title: "Reserve, NAV, and the log",
     text: "Supply, value locked, the live HCS task log, and the contributor score. Every figure links to HashScan.",
   },
@@ -29,50 +33,23 @@ const DESKS = [
 
 export default function HomePage() {
   return (
-    <>
-      <div className="kicker">Escrowed payroll for people who train AI</div>
-      <h1>The money is locked before the work starts, and silence pays the freelancer.</h1>
-      <p className="lede">
-        An AI lab funds a batch in bUSD. The pay sits in an escrow on Hedera before a freelancer in Pune, or anywhere else, claims the task. Submit the work and a
-        scheduled transaction is armed. If QA and the reviewer stay quiet, that schedule pays the freelancer.
-      </p>
-
-      <div className="grid2" style={{ marginTop: 28 }}>
+    <div className="home">
+      <p className="sentence">Escrowed bUSD payroll for people who train AI: a lab locks the pay before the work starts, and silence pays the freelancer.</p>
+      <nav className="desks" aria-label="Desks">
         {DESKS.map((d) => (
-          <Link key={d.href} href={d.href} className="card home-card">
-            <div className="kicker">{d.kicker}</div>
-            <h2>{d.title}</h2>
-            <p className="sub">{d.text}</p>
+          <Link key={d.href} href={d.href} className="desk">
+            <span className="desk-index">{d.index}</span>
+            <span className="desk-name">{d.name}</span>
+            <span className="desk-copy">
+              <strong>{d.title}</strong>
+              <span>{d.text}</span>
+            </span>
+            <span className="desk-go" aria-hidden="true">
+              →
+            </span>
           </Link>
         ))}
-      </div>
-
-      <div className="card" style={{ marginTop: 22 }}>
-        <h2>How a task gets paid</h2>
-        <ol className="steps">
-          <li>
-            <span className="s">1</span>
-            <span>The lab locks pay plus the fee. Nothing can be claimed until the batch is funded.</span>
-          </li>
-          <li>
-            <span className="s">2</span>
-            <span>A World ID freelancer binds a payout account, claims, and submits. The review deadline is public.</span>
-          </li>
-          <li>
-            <span className="s">3</span>
-            <span>$100 or less can pay the moment QA passes. Over $100, a reviewer approves or holds with a reason.</span>
-          </li>
-          <li>
-            <span className="s">4</span>
-            <span>If the deadline passes with no decision, the schedule releases the pay. The freelancer holds bUSD, and the page shows the rupee value.</span>
-          </li>
-        </ol>
-      </div>
-
-      <p className="foot-note">
-        Testnet demo. The lab key and the freeze key are demo custody. Redeeming to rupees is simulated. Work stays off-chain. HashScan shows the hashes, the
-        amounts, and the deadlines.
-      </p>
-    </>
+      </nav>
+    </div>
   );
 }

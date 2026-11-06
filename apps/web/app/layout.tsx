@@ -1,34 +1,53 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
-import { Fraunces, Inter, JetBrains_Mono } from "next/font/google";
+import Link from "next/link";
+import { IBM_Plex_Sans, Newsreader } from "next/font/google";
 import { Nav } from "@/components/Nav";
 import "./globals.css";
 
-const serif = Fraunces({ subsets: ["latin"], variable: "--font-serif", display: "swap" });
-const sans = Inter({ subsets: ["latin"], variable: "--font-sans", display: "swap" });
-const mono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-mono", display: "swap" });
+const serif = Newsreader({
+  subsets: ["latin"],
+  variable: "--font-serif",
+  display: "swap",
+  weight: ["400", "500", "600", "700"],
+  style: ["normal", "italic"],
+});
+
+const sans = IBM_Plex_Sans({
+  subsets: ["latin"],
+  variable: "--font-sans",
+  display: "swap",
+  weight: ["400", "500", "600"],
+});
 
 export const metadata: Metadata = {
-  title: "Byline Work",
-  description: "The money is locked before the work starts, and silence pays the freelancer. Escrowed payroll for people who train AI.",
+  title: "Ponos · Byline Work",
+  description: "Escrowed bUSD payroll for people who train AI. A lab locks the pay before the work starts, and silence pays the freelancer.",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" className={`${serif.variable} ${sans.variable} ${mono.variable}`}>
+    <html lang="en" className={`${serif.variable} ${sans.variable}`}>
       <body>
-        <header className="mast">
-          <div className="wrap">
-            <a className="brand" href="/">
-              <b>Byline Work</b>
-              <span>silence pays the freelancer</span>
-            </a>
+        <div className="shell">
+          <aside className="rail">
+            <Link className="wordmark" href="/">
+              Ponos
+              <span>Byline Work</span>
+            </Link>
             <Nav />
+            <p className="rail-foot">Escrowed bUSD payroll. The money is locked before the work starts.</p>
+          </aside>
+          <div className="stage">
+            <header className="topbar">
+              <Link className="wordmark" href="/">
+                Ponos
+              </Link>
+              <Nav />
+            </header>
+            <main>{children}</main>
           </div>
-        </header>
-        <main>
-          <div className="wrap">{children}</div>
-        </main>
+        </div>
       </body>
     </html>
   );
