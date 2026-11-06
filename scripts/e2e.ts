@@ -10,6 +10,7 @@ import { evmAddressFromKey, tokenBalance } from "../apps/api/src/chain";
 import { config } from "../apps/api/src/config";
 import { all, get, openDb, run, type WorkerRow } from "../apps/api/src/db";
 import { approveTask, registerWorker } from "../apps/api/src/escrow";
+import { consumeApproval } from "../apps/api/src/world";
 import { indexerTick } from "../apps/api/src/indexer";
 import { keeperTick } from "../apps/api/src/keeper";
 import { claim, createBatch, submit } from "../apps/api/src/work";
@@ -127,8 +128,24 @@ console.log("instant");
 console.log("approved");
 {
   const batch = await createBatch(db, { title: "e2e approved", qaMode: "auto", payPerTask: "250", taskCount: 1, reviewWindow: 3600, workWindow: 3600, revisionWindow: 3600, rubric: checklist, tasks: [one()], labAccountId: lab });
-  const claimed = await claim(db, worker, batch.batchId);
-  await submit(db, worker, Number(claimed.taskId), { answers: gold, checklist: { done: true } }, false);
+  // Above 100 bUSD the real claim() demands a World-verified worker and a single-use claim_high approval for this batch.
+  // A browser World ID login cannot run headless, so insert the two rows a successful step-up creates (clearly labelled
+  // as simulated) and still go through the real gate, including its replay and wrong-target refusals.
+  const verifiedId = randomUUID();
+  run(db, "INSERT INTO workers (id, kind, label, display_name, world_iss, world_sub, account_id, evm_address, chain_evm, created_at) VALUES (?, 'world', 'e2e simulated step-up', 'e2e (simulated World ID)', 'e2e-simulated', ?, ?, ?, ?, ?)", verifiedId, `e2e-${verifiedId}`, workerAccount, evm, evm, Date.now());
+  const verified = get<WorkerRow>(db, "SELECT * FROM workers WHERE id = ?", verifiedId)!;
+  const approvalId = randomUUID();
+  const nowSec = Math.floor(Date.now() / 1000);
+  run(db, "INSERT INTO approvals (id, worker_id, action, target, auth_time, acr, created_at, expires_at) VALUES (?, ?, 'claim_high', ?, ?, 'e2e-simulated', ?, ?)", approvalId, verifiedId, batch.batchId, nowSec, nowSec, nowSec + 600);
+  const wrongTarget = consumeApproval(db, approvalId, verifiedId, "claim_high", `0x${"00".repeat(32)}`);
+  if (wrongTarget.ok) die("a claim_high approval was accepted for a different batch");
+  const noApproval = await claim(db, verified, batch.batchId).then(() => null, (e: unknown) => e);
+  if (!noApproval) die("a task over 100 bUSD was claimed without a step-up approval");
+  const claimed = await claim(db, verified, batch.batchId, approvalId);
+  const replay = consumeApproval(db, approvalId, verifiedId, "claim_high", batch.batchId);
+  if (replay.ok || replay.reason !== "already_used") die("a claim_high approval could be used twice");
+  console.log("  step-up gate: refused without approval, refused for another batch, accepted once, refused on replay");
+  await submit(db, verified, Number(claimed.taskId), { answers: gold, checklist: { done: true } }, false);
   const before = await balances();
   await approveTask(BigInt(claimed.taskId));
   await expectHcs(Number(claimed.taskId), ["TaskClaimed", "TaskSubmitted", "QaPassed", "TaskApproved", "TaskReleased"]);
