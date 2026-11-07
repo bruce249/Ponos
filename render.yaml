@@ -1,0 +1,224 @@
+# Render Blueprint for Ponos / Byline Work. Reference only: the live services
+# were created with `render services create` and are not linked to a Blueprint,
+# so editing this file does not change them. Deploys are triggered by hand
+# (`render deploys create <service> --commit <sha>`).
+#
+# Live: https://ponos-byline-web.onrender.com (web)
+#       https://ponos-byline-api.onrender.com (API)
+#
+# No secrets in this file. Every key and account credential is `sync: false`
+# and set in the Render dashboard from the local .env.
+#
+# Two public hosts. The browser only talks to the web host. Next rewrites
+# /api/* and /x402/* to API_URL (see apps/web/next.config.ts). The session
+# cookie bw_session is host-only (no Domain), SameSite=Lax, Secure when
+# SESSION_SECURE=true. onrender.com is a public suffix, so the API host
+# cannot share that cookie. WORLD_REDIRECT_URI is therefore the web origin
+# plus /api/world/callback, and the API redirects back to WEB_ORIGIN/work.
+#
+# SQLite is ephemeral unless the API disk below is attached. DB_PATH is on
+# that disk. A disk forces a single instance and a short gap on each deploy.
+
+services:
+  - type: web
+    name: ponos-byline-api
+    runtime: node
+    repo: https://github.com/m-pandey5/Ponos
+    branch: muskan
+    region: singapore
+    plan: 0.5c-512mb
+    healthCheckPath: /api/health
+    buildCommand: npm ci --include=dev
+    startCommand: npm run start:api
+    autoDeployTrigger: commit
+    disk:
+      name: ponos-sqlite
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_VERSION
+        value: "22.21.0"
+      - key: SESSION_SECURE
+        value: "true"
+      - key: DB_PATH
+        value: /var/data/byline-work.db
+      - key: WEB_ORIGIN
+        value: https://ponos-byline-web.onrender.com
+      - key: WORLD_REDIRECT_URI
+        value: https://ponos-byline-web.onrender.com/api/world/callback
+      - key: API_PUBLIC_URL
+        value: https://ponos-byline-api.onrender.com
+      # Filled from the local .env after login. Values are not in this file.
+      # Do not set PORT (Render assigns it). Do not copy the local WEB_ORIGIN,
+      # WORLD_REDIRECT_URI, API_PUBLIC_URL, DB_PATH, or SESSION_SECURE.
+      - key: HEDERA_NETWORK
+        sync: false
+      - key: HEDERA_JSON_RPC
+        sync: false
+      - key: OPERATOR_ACCOUNT_ID
+        sync: false
+      - key: OPERATOR_PRIVATE_KEY
+        sync: false
+      - key: HCS_TOPIC_ID
+        sync: false
+      - key: X402_FACILITATOR_URL
+        sync: false
+      - key: SCS_FACTORY_ADDRESS
+        sync: false
+      - key: SCS_RESOLVER_ADDRESS
+        sync: false
+      - key: BUSD_TOKEN_ID
+        sync: false
+      - key: BUSD_SCS_PROXY
+        sync: false
+      - key: BUSD_RESERVE_ADDRESS
+        sync: false
+      - key: BUSD_TOKEN_EVM
+        sync: false
+      # Public ids of the live escrow (verified on HashScan). Without these the
+      # API boots with chain=false and the desks show no batches.
+      - key: ESCROW_CONTRACT_ID
+        value: 0.0.11341621
+      - key: ESCROW_ADDRESS
+        value: "0x0000000000000000000000000000000000ad0f35"
+      - key: ESCROW_SCHEDULING
+        sync: false
+      - key: HITL_THRESHOLD
+        sync: false
+      - key: DUAL_REVIEW_THRESHOLD
+        sync: false
+      - key: PLATFORM_FEE_BPS
+        sync: false
+      - key: QA_POOL_SHARE_BPS
+        sync: false
+      - key: MIN_WINDOW_SEC
+        sync: false
+      - key: MAX_WINDOW_SEC
+        sync: false
+      - key: DISPUTE_WINDOW_SEC
+        sync: false
+      - key: KEEPER_INTERVAL_SEC
+        sync: false
+      - key: INDEXER_INTERVAL_SEC
+        sync: false
+      - key: HBAR_LOW_TINYBAR
+        sync: false
+      - key: FEED_SIGNER_KEY
+        sync: false
+      - key: FX_API_URL
+        sync: false
+      - key: PRICE_RESERVE_TINYBAR
+        sync: false
+      - key: PRICE_STATS_TINYBAR
+        sync: false
+      - key: WORLD_ISSUER
+        sync: false
+      - key: WORLD_CLIENT_ID
+        sync: false
+      - key: WORLD_CLIENT_SECRET
+        sync: false
+      - key: WORLD_STEPUP_MAX_AGE_SEC
+        sync: false
+      - key: WORLD_APPROVAL_TTL_SEC
+        sync: false
+      - key: WORLD_REQUIRE_ACR
+        sync: false
+      - key: DEMO_MOCK_WORLD
+        sync: false
+      - key: ZG_API_KEY
+        sync: false
+      - key: ZG_BASE_URL
+        sync: false
+      - key: ZG_MODEL
+        sync: false
+      - key: ZG_TRUST_MODE
+        sync: false
+      - key: ZG_DISABLE_THINKING
+        sync: false
+      - key: DAILY_CLAIM_CAP
+        sync: false
+      - key: IN_FLIGHT_CAP_NEW
+        sync: false
+      - key: SCS_ADMIN_ACCOUNT_ID
+        sync: false
+      - key: SCS_ADMIN_PRIVATE_KEY
+        sync: false
+      - key: CASHIN_ACCOUNT_ID
+        sync: false
+      - key: CASHIN_PRIVATE_KEY
+        sync: false
+      - key: BURN_ACCOUNT_ID
+        sync: false
+      - key: BURN_PRIVATE_KEY
+        sync: false
+      - key: COMPLIANCE_ACCOUNT_ID
+        sync: false
+      - key: COMPLIANCE_PRIVATE_KEY
+        sync: false
+      - key: TREASURY_ACCOUNT_ID
+        sync: false
+      - key: TREASURY_PRIVATE_KEY
+        sync: false
+      - key: QA_POOL_ACCOUNT_ID
+        sync: false
+      - key: QA_POOL_PRIVATE_KEY
+        sync: false
+      - key: ESCROW_ADMIN_ACCOUNT_ID
+        sync: false
+      - key: ESCROW_ADMIN_PRIVATE_KEY
+        sync: false
+      - key: BACKEND_ACCOUNT_ID
+        sync: false
+      - key: BACKEND_PRIVATE_KEY
+        sync: false
+      - key: QA_ORACLE_ACCOUNT_ID
+        sync: false
+      - key: QA_ORACLE_PRIVATE_KEY
+        sync: false
+      - key: REVIEWER_ACCOUNT_ID
+        sync: false
+      - key: REVIEWER_PRIVATE_KEY
+        sync: false
+      - key: LAB_ACCOUNT_ID
+        sync: false
+      - key: LAB_PRIVATE_KEY
+        sync: false
+      - key: WORKER_A_ACCOUNT_ID
+        sync: false
+      - key: WORKER_A_PRIVATE_KEY
+        sync: false
+      - key: WORKER_B_ACCOUNT_ID
+        sync: false
+      - key: WORKER_B_PRIVATE_KEY
+        sync: false
+      - key: WORKER_RENTED_ACCOUNT_ID
+        sync: false
+      - key: WORKER_RENTED_PRIVATE_KEY
+        sync: false
+      - key: AGENT_ACCOUNT_ID
+        sync: false
+      - key: AGENT_PRIVATE_KEY
+        sync: false
+      - key: LAB_ALLOWLIST
+        sync: false
+      - key: REVIEWER_ALLOWLIST
+        sync: false
+
+  - type: web
+    name: ponos-byline-web
+    runtime: node
+    repo: https://github.com/m-pandey5/Ponos
+    branch: muskan
+    region: singapore
+    plan: 0.5c-512mb
+    healthCheckPath: /
+    # API_URL is read when Next loads next.config.ts. Render injects service
+    # env vars for the build, so the rewrite target is the public API URL.
+    buildCommand: npm ci --include=dev && npm run build -w @byline/web
+    startCommand: bash -c 'cd apps/web && exec npx --no-install next start -H 0.0.0.0 -p "$PORT"'
+    autoDeployTrigger: commit
+    envVars:
+      - key: NODE_VERSION
+        value: "22.21.0"
+      - key: API_URL
+        value: https://ponos-byline-api.onrender.com
