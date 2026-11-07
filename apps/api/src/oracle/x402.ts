@@ -57,8 +57,55 @@ async function supplyOf(): Promise<bigint> {
   return BigInt(data.total_supply ?? 0);
 }
 
-function reserveOf(db: Db): { amount: bigint; tx: string | null } {
+function reserveFromMeta(db: Db): { amount: bigint; tx: string | null } {
   return { amount: BigInt(metaGet(db, "busd_reserve") ?? "0"), tx: metaGet(db, "busd_reserve_tx") ?? null };
+}
+
+/** "0.0.N" or "0x…" to the EVM address the JSON-RPC relay accepts. */
+function evmOf(id: string): string | null {
+  if (/^0x[0-9a-fA-F]{40}$/.test(id)) return id;
+  const m = /^0\.0\.(\d+)$/.exec(id);
+  return m ? `0x${BigInt(m[1]!).toString(16).padStart(40, "0")}` : null;
+}
+
+let chainReserve: { at: number; amount: bigint } | null = null;
+
+/**
+ * The Stablecoin Studio reserve is a Chainlink-style feed: latestRoundData().answer at decimals().
+ * Read it on-chain so every server shows the real reserve, not only the one that ran a deposit.
+ * Cached 30 s. Returns null when the address is unset or the relay fails.
+ */
+async function reserveOnChain(): Promise<bigint | null> {
+  if (chainReserve && Date.now() - chainReserve.at < 30_000) return chainReserve.amount;
+  const to = evmOf(config.token.reserve);
+  if (!to) return null;
+  const call = async (data: string) => {
+    const res = await fetch(config.hedera.jsonRpc, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_call", params: [{ to, data }, "latest"] }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    const body = (await res.json()) as { result?: string };
+    if (!body.result || body.result === "0x") throw new Error("empty eth_call result");
+    return body.result.slice(2);
+  };
+  try {
+    const decimals = Number(BigInt(`0x${await call("0x313ce567")}`));
+    const round = await call("0xfeaf968c");
+    const answer = BigInt(`0x${round.slice(64, 128)}`);
+    const amount = decimals <= 6 ? answer * 10n ** BigInt(6 - decimals) : answer / 10n ** BigInt(decimals - 6);
+    chainReserve = { at: Date.now(), amount };
+    return amount;
+  } catch {
+    return null;
+  }
+}
+
+async function reserveOf(db: Db): Promise<{ amount: bigint; tx: string | null }> {
+  const meta = reserveFromMeta(db);
+  const onChain = await reserveOnChain();
+  return { amount: onChain ?? meta.amount, tx: meta.tx };
 }
 
 /** NAV with 6 decimal places, integer division. Null when supply is zero. */
@@ -72,7 +119,7 @@ export function navRatio(reserve: bigint, supply: bigint): string | null {
 
 export async function reserveView(db: Db) {
   const supply = await supplyOf();
-  const reserve = reserveOf(db);
+  const reserve = await reserveOf(db);
   const ratio = navRatio(reserve.amount, supply);
   return {
     feed: "reserve" as const,
@@ -87,7 +134,7 @@ export async function reserveView(db: Db) {
 
 export async function navView(db: Db) {
   const supply = await supplyOf();
-  const reserve = reserveOf(db);
+  const reserve = await reserveOf(db);
   const nav = navRatio(reserve.amount, supply) ?? "0";
   run(db, "INSERT INTO nav_history (nav, supply, reserve, tx, created_at) VALUES (?, ?, ?, ?, ?)", nav, supply.toString(), reserve.amount.toString(), reserve.tx, Date.now());
   const history = all<{ nav: string; supply: string; reserve: string; tx: string | null; created_at: number }>(
