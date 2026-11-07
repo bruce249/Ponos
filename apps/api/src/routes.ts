@@ -22,7 +22,7 @@ import {
 } from "@byline-work/shared";
 import { banWorker } from "./caps";
 import { config, labAllowlist, ready, reviewerAllowlist } from "./config";
-import { evmAddressFromKey, tokenBalance } from "./chain";
+import { evmAddressFromKey, tokenBalance, tokenFreezeStatus } from "./chain";
 import { all, chainEvm, get, run, type BatchRow, type Db, type TaskRow, type WorkerRow } from "./db";
 import { approveTask, holdTask, resolveTask, setWorkerStatus } from "./escrow";
 import { submitHcs } from "./hcs";
@@ -625,6 +625,10 @@ export function mount(app: Hono, db: Db) {
     if (!body.workerId || !body.accountId) return c.json({ error: "workerId and accountId are required" }, 400);
     const w = get<WorkerRow>(db, "SELECT * FROM workers WHERE id = ?", body.workerId);
     if (!w || !chainEvm(w)) return c.json({ error: "unknown worker" }, 404);
+    // Freeze only this worker's own payout account, never an arbitrary account id from the request.
+    if (w.account_id && body.accountId !== w.account_id) {
+      return c.json({ error: `accountId does not match this worker's payout account (${w.account_id})` }, 400);
+    }
     try {
       const { freeze } = await import("../../../stablecoin/lifecycle");
       const freezeTx = await freeze(body.accountId);
@@ -650,8 +654,22 @@ export function mount(app: Hono, db: Db) {
     const missing = ["BUSD_TOKEN_ID", "COMPLIANCE_ACCOUNT_ID", "COMPLIANCE_PRIVATE_KEY"].filter((k) => !(process.env[k] ?? "").trim());
     if (missing.length) return c.json({ error: "Freeze is not configured", missing, custody: "demo" }, 503);
     const body = await c.req.json().catch(() => ({} as { accountId?: string }));
-    if (!body.accountId) return c.json({ error: "accountId is required" }, 400);
+    if (!body.accountId || !/^0\.0\.\d+$/.test(body.accountId)) return c.json({ error: "accountId like 0.0.1234 is required" }, 400);
+    // This desk has no login (demo custody). It may freeze a worker's wallet, never the escrow or a platform role:
+    // a frozen escrow, treasury or QA pool would stop every payout.
+    const roles = config.roles as Record<string, { accountId: string }>;
+    const platformRoles = ["operator", "scsAdmin", "cashin", "burn", "compliance", "treasury", "qaPool", "escrowAdmin", "backend", "qaOracle", "reviewer", "lab", "agent"];
+    const platform = new Set([config.escrow.contractId, config.token.id, ...platformRoles.map((k) => roles[k]?.accountId)].filter(Boolean));
+    if (platform.has(body.accountId)) {
+      return c.json({ error: `${body.accountId} is a platform account (escrow, token or role). Only worker wallets can be frozen here.` }, 403);
+    }
     try {
+      // Stablecoin Studio freezes through its contract, so an already-frozen account comes back as a bare
+      // CONTRACT_REVERT_EXECUTED. Read the state first and answer plainly.
+      const current = await tokenFreezeStatus(body.accountId, config.token.id).catch(() => null);
+      if (current === "FROZEN") {
+        return c.json({ error: `${body.accountId} is already frozen for bUSD. Nothing changed.`, alreadyFrozen: true, accountId: body.accountId }, 409);
+      }
       const { freeze } = await import("../../../stablecoin/lifecycle");
       const freezeTx = await freeze(body.accountId);
       const w = get<WorkerRow>(db, "SELECT * FROM workers WHERE account_id = ?", body.accountId);

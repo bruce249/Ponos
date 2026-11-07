@@ -400,7 +400,7 @@ function FreezePanel({ onDone }: { onDone: (note: FlashNote) => void }) {
       };
     } catch (err) {
       const msg = errorMessage(err);
-      result = /ACCOUNT_FROZEN_FOR_TOKEN/i.test(msg)
+      result = /already frozen|ACCOUNT_FROZEN_FOR_TOKEN/i.test(msg)
         ? { kind: "info", title: `${id} is already frozen.`, text: "Nothing changed. Check its token status on HashScan.", refs: { accountId: id } }
         : { kind: "bad", title: "Freeze failed", text: msg };
     } finally {

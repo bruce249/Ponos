@@ -193,6 +193,14 @@ export async function tokenBalance(accountId: string, tokenId: string): Promise<
   return BigInt(data.tokens?.[0]?.balance ?? 0);
 }
 
+/** The account's freeze status for a token from the mirror node, or null when it has no relationship with it. */
+export async function tokenFreezeStatus(accountId: string, tokenId: string): Promise<"FROZEN" | "UNFROZEN" | "NOT_APPLICABLE" | null> {
+  const data = (await mirrorGet(`/api/v1/accounts/${accountId}/tokens?token.id=${tokenId}&limit=1`)) as {
+    tokens?: { freeze_status?: "FROZEN" | "UNFROZEN" | "NOT_APPLICABLE" }[];
+  };
+  return data.tokens?.[0]?.freeze_status ?? null;
+}
+
 export function knownAccountByEvm(evm: string): string | null {
   const want = evm.toLowerCase();
   for (const role of Object.values(config.roles)) {
